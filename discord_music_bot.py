@@ -17,15 +17,7 @@ DISCORD_BOT_TOKEN = "MTM4MzY3ODk2MjgzMTU4OTUwOQ.G1uWjY.ctY6kbpI7HQeeec9QIq0NdMGS
 SPOTIFY_CLIENT_ID = "56a295f2e2d0424588992d92275cd1c8"  
 SPOTIFY_CLIENT_SECRET = "eba3e96a03334f7a832ae5f06ceb48d2"
 
-if not DISCORD_BOT_TOKEN:
-    logger.error("DISCORD_BOT_TOKEN environment variable is required")
-    exit(1)
-
-if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
-    logger.warning("Spotify credentials not found. Spotify functionality will be disabled.")
-    SPOTIFY_ENABLED = False
-else:
-    SPOTIFY_ENABLED = True
+SPOTIFY_ENABLED = True
 
 # ---- Spotify Setup ----
 if SPOTIFY_ENABLED:
