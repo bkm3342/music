@@ -838,10 +838,13 @@ async def play_youtube_search_simple(interaction, query):
         title = video_info.get('title', 'Unknown Title')
         guild_queue = get_guild_queue(interaction.guild.id)
         
-        source = discord.FFmpegPCMAudio(
-            audio_url,
-            executable=FFMPEG_PATH,
-            **get_ffmpeg_options(guild_queue.volume)
+        source = discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(
+                audio_url,
+                executable=FFMPEG_PATH,
+                **get_ffmpeg_options()
+            ),
+            volume=guild_queue.volume
         )
 
         voice_client = interaction.guild.voice_client
@@ -895,10 +898,13 @@ async def play_youtube_simple(interaction, url):
             return
 
         guild_queue = get_guild_queue(interaction.guild.id)
-        source = discord.FFmpegPCMAudio(
-            audio_url,
-            executable=FFMPEG_PATH,
-            **get_ffmpeg_options(guild_queue.volume)
+        source = discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(
+                audio_url,
+                executable=FFMPEG_PATH,
+                **get_ffmpeg_options()
+            ),
+            volume=guild_queue.volume
         )
 
         voice_client = interaction.guild.voice_client
@@ -1010,16 +1016,19 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
 
         # Enhanced audio source with better quality settings and dynamic volume
         guild_queue = get_guild_queue(interaction.guild.id)
-        source = discord.FFmpegPCMAudio(
-            audio_url,
-            executable=FFMPEG_PATH,
-            **get_ffmpeg_options(guild_queue.volume)
+        source = discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(
+                audio_url,
+                executable=FFMPEG_PATH,
+                **get_ffmpeg_options()
+            ),
+            volume=guild_queue.volume
         )
 
         voice_client = interaction.guild.voice_client
         if voice_client.is_playing():
             voice_client.stop()
-        voice_client.play(source)
+        voice_client.play(source, after=lambda e: asyncio.create_task(wait_for_song_completion(interaction)) if e is None else None)
         
         # Store current song info per guild
         if spotify_link and track_name and artist_name:
@@ -1244,9 +1253,10 @@ async def dashboard(interaction: discord.Interaction):
         else:
             embed.add_field(name="Status", value="⏹️ Stopped", inline=True)
         
-        embed.add_field(name="Queue Size", value=f"{guild_queue.size()} songs", inline=True)
+        embed.add_field(name="Queue", value=f"{guild_queue.size()} songs waiting", inline=True)
         embed.add_field(name="Auto-Play", value="🔄 ON" if guild_queue.is_auto_play else "❌ OFF", inline=True)
-        embed.add_field(name="Audio Quality", value="🎧 High Quality", inline=True)
+        embed.add_field(name="Volume", value=f"🔊 {guild_queue.get_volume_percentage()}%", inline=True)
+        embed.add_field(name="Quality", value="🎧 High Quality Audio", inline=True)
         
         view = MusicDashboardView(interaction.guild.id)
         await interaction.response.send_message(embed=embed, view=view)
