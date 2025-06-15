@@ -82,25 +82,73 @@ def get_ffmpeg_options(volume=0.5, seek_time=0):
     # Only use seek if it's greater than 1 second to avoid FFmpeg errors with very small values
     seek_option = f'-ss {int(seek_time)}' if seek_time >= 1 else ''
     return {
-        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M {seek_option}',
-        'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 256k -bufsize 2M'
+        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M {seek_option} -nostdin',
+        'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 256k -bufsize 2M -threads 2 -cpu-used 0'
     }
 
-# Enhanced Animated Emojis
+# Voice stability enhancements
+async def ensure_voice_connection(guild):
+    """Ensure stable voice connection for a guild"""
+    try:
+        voice_client = guild.voice_client
+        if not voice_client or not voice_client.is_connected():
+            # Find a voice channel to reconnect to
+            for channel in guild.voice_channels:
+                if len(channel.members) > 0:
+                    voice_client = await channel.connect(timeout=10.0, reconnect=True)
+                    guild_voice_clients[guild.id] = voice_client
+                    logger.info(f"Reconnected to voice channel: {channel.name} in guild: {guild.name}")
+                    return voice_client
+        return voice_client
+    except Exception as e:
+        logger.error(f"Voice connection error in guild {guild.name}: {e}")
+        return None
+
+async def handle_voice_error(guild, error):
+    """Handle voice connection errors with automatic recovery"""
+    try:
+        logger.error(f"Voice error in guild {guild.name}: {error}")
+        voice_client = await ensure_voice_connection(guild)
+        if voice_client:
+            # Try to resume playback if there was a current song
+            guild_queue = get_guild_queue(guild.id)
+            current_song = current_song_info.get(guild.id)
+            if current_song and not guild_queue.is_empty():
+                logger.info(f"Attempting to resume playback in guild {guild.name}")
+                # Add current song back to front of queue
+                guild_queue.queue.insert(0, current_song)
+    except Exception as e:
+        logger.error(f"Error in voice error handler for guild {guild.name}: {e}")
+
+# Connection timeout and retry mechanism
+async def safe_voice_connect(channel, retries=3):
+    """Safely connect to voice channel with retry mechanism"""
+    for attempt in range(retries):
+        try:
+            voice_client = await channel.connect(timeout=10.0, reconnect=True)
+            return voice_client
+        except Exception as e:
+            logger.warning(f"Voice connection attempt {attempt + 1} failed: {e}")
+            if attempt < retries - 1:
+                await asyncio.sleep(2)  # Wait before retry
+            else:
+                raise e
+
+# Enhanced Animated Emojis (using static emojis as fallback for compatibility)
 ANIMATED_EMOJIS = {
-    'play': '<a:music_play:1234567890123456789>',
-    'pause': '<a:music_pause:1234567890123456789>',
-    'stop': '<a:music_stop:1234567890123456789>',
-    'skip': '<a:music_skip:1234567890123456789>',
-    'queue': '<a:music_queue:1234567890123456789>',
-    'volume_up': '<a:volume_up:1234567890123456789>',
-    'volume_down': '<a:volume_down:1234567890123456789>',
-    'autoplay': '<a:autoplay:1234567890123456789>',
-    'loading': '<a:loading:1234567890123456789>',
-    'success': '<a:success:1234567890123456789>',
-    'error': '<a:error:1234567890123456789>',
-    'music_note': '<a:music_note:1234567890123456789>',
-    'sound_wave': '<a:sound_wave:1234567890123456789>'
+    'play': '🎵',
+    'pause': '⏸️',
+    'stop': '⏹️',
+    'skip': '⏭️',
+    'queue': '📜',
+    'volume_up': '🔊',
+    'volume_down': '🔉',
+    'autoplay': '🔄',
+    'loading': '⏳',
+    'success': '✅',
+    'error': '❌',
+    'music_note': '🎵',
+    'sound_wave': '〰️'
 }
 
 # Fallback static emojis if animated ones aren't available
@@ -146,6 +194,72 @@ played_songs_history = {}  # Track played songs to avoid repetition
 volume_messages = {}  # Track volume messages for editing
 paused_guilds = set()  # Track paused guilds to prevent auto-play
 manually_skipped_guilds = set()  # Track guilds where skip button was used
+
+# Performance optimization storage
+cache_expire_time = {}  # Track cache expiration times
+ytdl_cache = {}  # Cache YouTube data temporarily
+guild_last_activity = {}  # Track last activity per guild for cleanup
+
+# Memory management and cleanup
+import weakref
+import gc
+
+async def cleanup_inactive_guilds():
+    """Clean up resources for inactive guilds"""
+    try:
+        current_time = time.time()
+        inactive_guilds = []
+        
+        for guild_id, last_activity in guild_last_activity.items():
+            if current_time - last_activity > 3600:  # 1 hour inactive
+                inactive_guilds.append(guild_id)
+        
+        for guild_id in inactive_guilds:
+            # Clean up guild resources
+            if guild_id in current_guild_queues:
+                del current_guild_queues[guild_id]
+            if guild_id in current_song_info:
+                del current_song_info[guild_id]
+            if guild_id in played_songs_history:
+                del played_songs_history[guild_id]
+            if guild_id in volume_messages:
+                del volume_messages[guild_id]
+            if guild_id in guild_last_activity:
+                del guild_last_activity[guild_id]
+            
+            paused_guilds.discard(guild_id)
+            manually_skipped_guilds.discard(guild_id)
+            
+        if inactive_guilds:
+            logger.info(f"Cleaned up {len(inactive_guilds)} inactive guilds")
+            gc.collect()  # Force garbage collection
+            
+    except Exception as e:
+        logger.error(f"Error in cleanup_inactive_guilds: {e}")
+
+async def update_guild_activity(guild_id):
+    """Update last activity time for a guild"""
+    guild_last_activity[guild_id] = time.time()
+
+# Enhanced caching for better performance
+def get_cached_ytdl_info(query, max_age=300):  # 5 minutes cache
+    """Get cached YouTube info or None if expired"""
+    if query in ytdl_cache:
+        cached_time, data = ytdl_cache[query]
+        if time.time() - cached_time < max_age:
+            return data
+        else:
+            del ytdl_cache[query]  # Remove expired cache
+    return None
+
+def cache_ytdl_info(query, data):
+    """Cache YouTube info with timestamp"""
+    ytdl_cache[query] = (time.time(), data)
+    
+    # Limit cache size to prevent memory issues
+    if len(ytdl_cache) > 100:
+        oldest_query = min(ytdl_cache.keys(), key=lambda k: ytdl_cache[k][0])
+        del ytdl_cache[oldest_query]
 
 async def generate_smart_autoplay_query(current_song):
     """Generate intelligent search queries for autoplay to avoid repeating songs"""
@@ -859,7 +973,13 @@ async def play(interaction: discord.Interaction, query: str):
     try:
         # Check if user is in voice channel
         if not interaction.user.voice:
-            await interaction.followup.send("❌ You need to be in a voice channel to use this command.", ephemeral=True)
+            embed = discord.Embed(
+                title=f"{get_emoji('error')} Voice Channel Required",
+                description="You need to be in a voice channel to use this command",
+                color=EMBED_COLORS['error']
+            )
+            embed.add_field(name="Solution", value="Join a voice channel and try again", inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
         
         # Connect to voice channel if not already connected
@@ -869,7 +989,12 @@ async def play(interaction: discord.Interaction, query: str):
                 guild_voice_clients[interaction.guild.id] = voice_client
                 logger.info(f"Connected to voice channel: {interaction.user.voice.channel.name} in guild: {interaction.guild.name}")
             except Exception as e:
-                await interaction.followup.send(f"❌ Failed to connect to voice channel: {e}")
+                embed = discord.Embed(
+                    title=f"{get_emoji('error')} Connection Failed",
+                    description=f"Failed to connect to voice channel: {str(e)}",
+                    color=EMBED_COLORS['error']
+                )
+                await interaction.followup.send(embed=embed)
                 return
         
         guild_queue = get_guild_queue(interaction.guild.id)
@@ -878,13 +1003,14 @@ async def play(interaction: discord.Interaction, query: str):
         if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
             guild_queue.add(query)
             embed = discord.Embed(
-                title="🔥 Added to Queue",
-                description=f"**{query}**",
-                color=0xff9500
+                title=f"{get_emoji('queue')} Added to Queue",
+                description=f"**{query[:60]}{'...' if len(query) > 60 else ''}**",
+                color=EMBED_COLORS['queue']
             )
-            embed.add_field(name="Position", value=f"{guild_queue.size()}", inline=True)
-            embed.add_field(name="Queue Size", value=f"{guild_queue.size()} songs", inline=True)
-            embed.add_field(name="Server", value=interaction.guild.name, inline=True)
+            embed.add_field(name="Queue Position", value=f"#{guild_queue.size()}", inline=True)
+            embed.add_field(name="Total Songs", value=f"{guild_queue.size()} tracks", inline=True)
+            embed.add_field(name="Auto-Play", value=f"{get_emoji('autoplay')} {'ON' if guild_queue.is_auto_play else 'OFF'}", inline=True)
+            embed.set_footer(text=f"Server: {interaction.guild.name}")
             await interaction.followup.send(embed=embed)
         else:
             await start_playback(interaction, query)
@@ -1409,30 +1535,87 @@ async def dashboard(interaction: discord.Interaction):
         guild_queue = get_guild_queue(interaction.guild.id)
         voice_client = interaction.guild.voice_client
         
-        embed = discord.Embed(title="🎵 Music Player Dashboard", color=0x00ff00)
-        embed.add_field(name="Server", value=interaction.guild.name, inline=True)
+        embed = discord.Embed(
+            title=f"{get_emoji('music_note')} Advanced Music Dashboard",
+            description=f"Full control center for {interaction.guild.name}",
+            color=EMBED_COLORS['info']
+        )
         
+        # Current playback status with enhanced visuals
         if voice_client and voice_client.is_playing():
             current_song = current_song_info.get(interaction.guild.id, "Unknown Song")
-            embed.add_field(name="🎵 Now Playing", value=current_song, inline=False)
-            embed.add_field(name="Status", value="▶️ Playing", inline=True)
+            embed.add_field(
+                name=f"{get_emoji('play')} Now Playing",
+                value=f"**{current_song[:50]}{'...' if len(current_song) > 50 else ''}**",
+                inline=False
+            )
+            embed.add_field(name="Status", value=f"{get_emoji('sound_wave')} Playing", inline=True)
         elif voice_client and voice_client.is_paused():
             current_song = current_song_info.get(interaction.guild.id, "Unknown Song")
-            embed.add_field(name="🎵 Current Song", value=current_song, inline=False)
-            embed.add_field(name="Status", value="⏸️ Paused", inline=True)
+            embed.add_field(
+                name=f"{get_emoji('pause')} Paused Track",
+                value=f"**{current_song[:50]}{'...' if len(current_song) > 50 else ''}**",
+                inline=False
+            )
+            embed.add_field(name="Status", value=f"{get_emoji('pause')} Paused", inline=True)
         else:
-            embed.add_field(name="Status", value="⏹️ Stopped", inline=True)
+            embed.add_field(name="Status", value=f"{get_emoji('stop')} Idle", inline=True)
         
-        embed.add_field(name="Queue", value=f"{guild_queue.size()} songs waiting", inline=True)
-        embed.add_field(name="Auto-Play", value="🔄 ON" if guild_queue.is_auto_play else "❌ OFF", inline=True)
-        embed.add_field(name="Volume", value=f"🔊 {guild_queue.get_volume_percentage()}%", inline=True)
-        embed.add_field(name="Quality", value="🎧 High Quality Audio", inline=True)
+        # Queue information with visual bar
+        queue_size = guild_queue.size()
+        if queue_size > 0:
+            queue_bar = "█" * min(queue_size, 10) + "░" * max(0, 10 - queue_size)
+            embed.add_field(
+                name=f"{get_emoji('queue')} Queue",
+                value=f"`{queue_bar}` {queue_size} tracks",
+                inline=True
+            )
+        else:
+            embed.add_field(name=f"{get_emoji('queue')} Queue", value="Empty", inline=True)
+        
+        # Volume with visual bar
+        volume_percentage = guild_queue.get_volume_percentage()
+        volume_bars = "█" * (volume_percentage // 5) + "░" * (20 - (volume_percentage // 5))
+        embed.add_field(
+            name=f"{get_emoji('volume_up')} Volume",
+            value=f"`{volume_bars}` {volume_percentage}%",
+            inline=True
+        )
+        
+        # Additional controls info
+        embed.add_field(
+            name=f"{get_emoji('autoplay')} Auto-Play",
+            value="Enabled" if guild_queue.is_auto_play else "Disabled",
+            inline=True
+        )
+        
+        embed.add_field(
+            name=f"{get_emoji('music_note')} Audio Quality",
+            value="256kbps High Quality",
+            inline=True
+        )
+        
+        embed.add_field(
+            name=f"{get_emoji('success')} Connection",
+            value="Stable" if voice_client else "Disconnected",
+            inline=True
+        )
+        
+        embed.set_footer(
+            text=f"Use the buttons below to control playback • Server: {interaction.guild.name}",
+            icon_url=interaction.guild.icon.url if interaction.guild.icon else None
+        )
         
         view = MusicDashboardView(interaction.guild.id)
         await interaction.response.send_message(embed=embed, view=view)
     except Exception as e:
         logger.error(f"Dashboard error in guild {interaction.guild.name}: {e}")
-        await interaction.response.send_message(f"❌ Dashboard error: {e}", ephemeral=True)
+        embed = discord.Embed(
+            title=f"{get_emoji('error')} Dashboard Error",
+            description="Failed to load music dashboard",
+            color=EMBED_COLORS['error']
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name='skip', description="Skip the current song")
 async def skip(interaction: discord.Interaction):
