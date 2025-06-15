@@ -350,6 +350,9 @@ class MusicDashboardView(discord.ui.View):
             guild_queue = get_guild_queue(self.guild_id)
             new_volume = guild_queue.increase_volume()
             
+            # Respond immediately to avoid timeout
+            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}% (Applied instantly!)", ephemeral=True)
+            
             # Apply volume immediately to current playing song
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_playing():
@@ -357,9 +360,7 @@ class MusicDashboardView(discord.ui.View):
                 if current_song:
                     # Stop current audio and restart with new volume
                     voice_client.stop()
-                    await self.restart_audio_with_volume(interaction, current_song, guild_queue.volume)
-            
-            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
+                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume))
             
         except Exception as e:
             logger.error(f"Volume up error: {e}")
@@ -375,6 +376,9 @@ class MusicDashboardView(discord.ui.View):
             guild_queue = get_guild_queue(self.guild_id)
             new_volume = guild_queue.decrease_volume()
             
+            # Respond immediately to avoid timeout
+            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}% (Applied instantly!)", ephemeral=True)
+            
             # Apply volume immediately to current playing song
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_playing():
@@ -382,9 +386,7 @@ class MusicDashboardView(discord.ui.View):
                 if current_song:
                     # Stop current audio and restart with new volume
                     voice_client.stop()
-                    await self.restart_audio_with_volume(interaction, current_song, guild_queue.volume)
-            
-            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
+                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume))
             
         except Exception as e:
             logger.error(f"Volume down error: {e}")
@@ -557,10 +559,20 @@ async def wait_for_song_completion(interaction):
             await asyncio.sleep(2)
         
         guild_queue = get_guild_queue(interaction.guild.id)
-        if guild_queue.is_auto_play and not guild_queue.is_empty():
-            next_song = guild_queue.next()
-            await interaction.followup.send(f"🎵 Auto-Playing Next: {next_song}")
-            await start_playback(interaction, next_song)
+        if guild_queue.is_auto_play:
+            if not guild_queue.is_empty():
+                # Play next song from queue
+                next_song = guild_queue.next()
+                await interaction.followup.send(f"🎵 Auto-Playing Next from Queue: {next_song}")
+                await start_playback(interaction, next_song)
+            else:
+                # Queue is empty, find similar song automatically
+                current_song = current_song_info.get(interaction.guild.id)
+                if current_song:
+                    # Generate a search query based on the previous song
+                    similar_query = f"{current_song} similar song"
+                    await interaction.followup.send(f"🎵 Auto-Playing Similar Song to: {current_song}")
+                    await start_playback(interaction, similar_query)
     except Exception as e:
         logger.error(f"Wait for song completion error: {e}")
 
