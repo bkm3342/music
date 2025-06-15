@@ -77,25 +77,25 @@ ytdl_format_options = {
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
-# Enhanced FFmpeg options with audio effects and maximum quality
-def get_ffmpeg_options(volume=0.5, seek_time=0, audio_effect=None):
+# Enhanced FFmpeg options with audio effects and maximum quality - optimized for smooth playback
+def get_ffmpeg_options(volume=0.8, seek_time=0, audio_effect=None):
     # Only use seek if it's greater than 1 second to avoid FFmpeg errors with very small values
     seek_option = f'-ss {int(seek_time)}' if seek_time >= 1 else ''
     
-    # Base high-quality audio filter
+    # Base high-quality audio filter with higher default volume
     base_filter = f"volume={volume}"
     
     # Add audio effects
     if audio_effect == "bass_boost":
-        base_filter += ",equalizer=f=60:width_type=h:width=50:g=5,equalizer=f=170:width_type=h:width=50:g=3"
+        base_filter += ",equalizer=f=60:width_type=h:width=50:g=8,equalizer=f=170:width_type=h:width=50:g=5,equalizer=f=310:width_type=h:width=50:g=3"
     elif audio_effect == "nightcore":
         base_filter += ",asetrate=48000*1.25,aresample=48000,atempo=1.06"
     elif audio_effect == "slowed_reverb":
-        base_filter += ",asetrate=48000*0.8,aresample=48000,aecho=0.8:0.9:1000:0.3"
+        base_filter += ",asetrate=48000*0.8,aresample=48000,aecho=0.8:0.9:1000:0.3,aecho=0.8:0.7:1800:0.25"
     
     return {
-        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 100M -analyzeduration 100M {seek_option} -nostdin',
-        'options': f'-vn -filter:a "{base_filter}" -ar 48000 -ac 2 -b:a 320k -bufsize 4M -threads 4 -preset ultrafast'
+        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200M -analyzeduration 200M {seek_option} -nostdin -fflags +fastseek',
+        'options': f'-vn -filter:a "{base_filter}" -ar 48000 -ac 2 -b:a 320k -bufsize 8M -maxrate 512k -threads 2 -preset veryfast -avoid_negative_ts make_zero'
     }
 
 # Voice stability enhancements
@@ -355,7 +355,7 @@ class MusicQueue:
         self.is_auto_play = True
         self.loop_current = False
         self.loop_queue = False
-        self.volume = 1.0  # Default volume (100%)
+        self.volume = 0.8  # Default volume (80%) - higher default for better sound
         self.max_volume = 1.0
         self.min_volume = 0.1
         self.volume_step = 0.1
@@ -634,12 +634,12 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             
             if voice_client and audio_url:
-                # Use PCMVolumeTransformer for real-time volume control
+                # Use PCMVolumeTransformer for real-time volume control with audio effects
                 source = discord.PCMVolumeTransformer(
                     discord.FFmpegPCMAudio(
                         audio_url,
                         executable=FFMPEG_PATH,
-                        **get_ffmpeg_options()
+                        **get_ffmpeg_options(guild_queue.volume, 0, guild_queue.audio_effect)
                     ),
                     volume=guild_queue.volume
                 )
@@ -658,6 +658,16 @@ class MusicDashboardView(discord.ui.View):
         try:
             guild = bot.get_guild(guild_id)
             if not guild:
+                return
+                
+            # CRITICAL FIX: Don't auto-play if we're changing audio effects
+            if guild_id in effect_changing_guilds:
+                logger.info(f"Skipping auto-play for guild {guild_id} - audio effect change in progress")
+                return
+                
+            # Don't auto-play if guild is paused or manually skipped
+            if guild_id in paused_guilds:
+                logger.info(f"Skipping auto-play for guild {guild_id} - currently paused")
                 return
                 
             guild_queue = get_guild_queue(guild_id)
@@ -706,7 +716,7 @@ class MusicDashboardView(discord.ui.View):
                         discord.FFmpegPCMAudio(
                             audio_url,
                             executable=FFMPEG_PATH,
-                            **get_ffmpeg_options()
+                            **get_ffmpeg_options(guild_queue.volume, 0, guild_queue.audio_effect)
                         ),
                         volume=guild_queue.volume
                     )
@@ -737,7 +747,7 @@ class MusicDashboardView(discord.ui.View):
                         discord.FFmpegPCMAudio(
                             audio_url,
                             executable=FFMPEG_PATH,
-                            **get_ffmpeg_options()
+                            **get_ffmpeg_options(guild_queue.volume, 0, guild_queue.audio_effect)
                         ),
                         volume=guild_queue.volume
                     )
