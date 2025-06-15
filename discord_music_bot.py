@@ -1074,7 +1074,7 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
         if voice_client.is_playing():
             voice_client.stop()
         def after_playing(error):
-            if error is None:
+            if error is None and interaction.guild.id not in paused_guilds:
                 asyncio.run_coroutine_threadsafe(wait_for_song_completion(interaction), bot.loop)
         
         voice_client.play(source, after=after_playing)
