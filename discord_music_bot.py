@@ -393,7 +393,7 @@ class MusicDashboardView(discord.ui.View):
                     volume=guild_queue.volume
                 )
                 
-                voice_client.play(source, after=lambda e: asyncio.create_task(self.on_song_finished(interaction.guild.id)) if e is None else None)
+                voice_client.play(source)
                 current_song_info[interaction.guild.id] = title
                 # Track when song started and cache audio URL
                 song_start_times[interaction.guild.id] = time.time()
