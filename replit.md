@@ -114,6 +114,8 @@ Changelog:
 - June 15, 2025: Added volume up/down controls with dynamic FFmpeg volume processing
 - June 15, 2025: Fixed skip button to properly play next song from queue with auto-play integration
 - June 15, 2025: Implemented server-specific volume settings with real-time adjustment feedback
+- June 15, 2025: Fixed volume controls to prevent song interruption and interaction timeout errors
+- June 15, 2025: Enhanced skip button with immediate queue progression and seamless audio transitions
 ```
 
 ## User Preferences

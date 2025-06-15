@@ -348,57 +348,49 @@ class MusicDashboardView(discord.ui.View):
     async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
-            old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
             
-            # Store current song info for restart
-            current_title = current_song_info.get(interaction.guild.id, "Unknown")
-            voice_client = interaction.guild.voice_client
+            # Respond with immediate volume feedback - no audio restart
+            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}% (will apply to next song)", ephemeral=True)
             
-            # If currently playing, apply volume change immediately
-            if voice_client and voice_client.is_playing():
-                # Force restart audio with new volume
-                voice_client.stop()
-                await asyncio.sleep(0.5)  # Small delay to ensure stop
-                
-                # Get current audio URL from stored info and restart
-                await self.restart_audio_with_volume(interaction, current_title, new_volume)
-            
-            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
         except Exception as e:
             logger.error(f"Volume up error: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+            except:
+                pass
     
     @discord.ui.button(label="🔉-", style=discord.ButtonStyle.secondary, row=1)
     async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
-            old_volume = guild_queue.volume  
             new_volume = guild_queue.decrease_volume()
             
-            # Store current song info for restart
-            current_title = current_song_info.get(interaction.guild.id, "Unknown")
-            voice_client = interaction.guild.voice_client
+            # Respond with immediate volume feedback - no audio restart
+            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}% (will apply to next song)", ephemeral=True)
             
-            # If currently playing, apply volume change immediately
-            if voice_client and voice_client.is_playing():
-                # Force restart audio with new volume
-                voice_client.stop()
-                await asyncio.sleep(0.5)  # Small delay to ensure stop
-                
-                # Get current audio URL from stored info and restart
-                await self.restart_audio_with_volume(interaction, current_title, new_volume)
-            
-            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
         except Exception as e:
             logger.error(f"Volume down error: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+            except:
+                pass
     
     async def restart_audio_with_volume(self, interaction, title, volume):
-        """Restart current audio with new volume"""
+        """Restart current audio with new volume quickly"""
         try:
+            # Use a background task to avoid blocking the interaction
+            asyncio.create_task(self._restart_audio_background(interaction.guild.id, title, volume))
+        except Exception as e:
+            logger.error(f"Error scheduling audio restart: {e}")
+    
+    async def _restart_audio_background(self, guild_id, title, volume):
+        """Background task to restart audio with new volume"""
+        try:
+            await asyncio.sleep(0.1)  # Minimal delay to ensure stop completed
+            
             # Search for the current song again to get fresh URL
             search_query = f"{title} song"
             info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
@@ -407,16 +399,21 @@ class MusicDashboardView(discord.ui.View):
                 video_info = info['entries'][0]
                 audio_url = self.get_best_audio_url(video_info)
                 if audio_url:
-                    voice_client = interaction.guild.voice_client
-                    if voice_client:
-                        source = discord.FFmpegPCMAudio(
-                            audio_url,
-                            executable=FFMPEG_PATH,
-                            **get_ffmpeg_options(volume)
-                        )
-                        voice_client.play(source)
+                    # Get voice client from guild
+                    guild = bot.get_guild(guild_id)
+                    if guild and guild.voice_client:
+                        voice_client = guild.voice_client
+                        if not voice_client.is_playing():
+                            source = discord.FFmpegPCMAudio(
+                                audio_url,
+                                executable=FFMPEG_PATH,
+                                **get_ffmpeg_options(volume)
+                            )
+                            voice_client.play(source)
+                            current_song_info[guild_id] = title
+                            logger.info(f"Volume changed to {int(volume*100)}% for: {title}")
         except Exception as e:
-            logger.error(f"Error restarting audio with volume: {e}")
+            logger.error(f"Error in background audio restart: {e}")
         
     @discord.ui.button(label="🗑️ Clear Queue", style=discord.ButtonStyle.danger, row=2)
     async def clear_button(self, interaction: discord.Interaction, button: discord.ui.Button):
