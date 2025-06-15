@@ -347,7 +347,7 @@ class MusicQueue:
         self.is_auto_play = True
         self.loop_current = False
         self.loop_queue = False
-        self.volume = 0.5  # Default volume (50%)
+        self.volume = 1.0  # Default volume (100%)
         self.max_volume = 1.0
         self.min_volume = 0.1
         self.volume_step = 0.1
@@ -940,7 +940,219 @@ class MusicDashboardView(discord.ui.View):
     def __init__(self, guild_id):
         super().__init__(timeout=None)
         self.guild_id = guild_id
+
+    @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.secondary, row=0)
+    async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            voice_client = interaction.guild.voice_client
+            if voice_client and voice_client.is_playing():
+                voice_client.pause()
+                await update_guild_activity(interaction.guild.id)
+                
+                embed = discord.Embed(
+                    title="⏸️ Music Paused",
+                    description=f"Paused by {interaction.user.mention}",
+                    color=EMBED_COLORS['warning']
+                )
+                embed.set_footer(text=f"Server: {interaction.guild.name}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Nothing is currently playing", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Pause button error: {e}")
+            await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+
+    @discord.ui.button(label="▶️ Resume", style=discord.ButtonStyle.success, row=0)
+    async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            voice_client = interaction.guild.voice_client
+            if voice_client and voice_client.is_paused():
+                voice_client.resume()
+                await update_guild_activity(interaction.guild.id)
+                
+                embed = discord.Embed(
+                    title="▶️ Music Resumed",
+                    description=f"Resumed by {interaction.user.mention}",
+                    color=EMBED_COLORS['success']
+                )
+                embed.set_footer(text=f"Server: {interaction.guild.name}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Nothing is currently paused", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Resume button error: {e}")
+            await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+
+    @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.primary, row=0)
+    async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            voice_client = interaction.guild.voice_client
+            guild_queue = get_guild_queue(self.guild_id)
+            
+            if voice_client and voice_client.is_playing():
+                voice_client.stop()
+                await update_guild_activity(interaction.guild.id)
+                
+                embed = discord.Embed(
+                    title="⏭️ Song Skipped",
+                    description=f"Skipped by {interaction.user.mention}",
+                    color=EMBED_COLORS['primary']
+                )
+                embed.set_footer(text=f"Server: {interaction.guild.name}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Nothing is currently playing", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Skip button error: {e}")
+            await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+
+    @discord.ui.button(label="🔀 Auto-Play", style=discord.ButtonStyle.secondary, row=1)
+    async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            guild_queue.toggle_auto_play()
+            
+            status = "ON" if guild_queue.is_auto_play else "OFF"
+            color = EMBED_COLORS['success'] if guild_queue.is_auto_play else EMBED_COLORS['warning']
+            
+            embed = discord.Embed(
+                title=f"🔀 Auto-Play {status}",
+                description=f"Auto-play has been turned **{status}** by {interaction.user.mention}",
+                color=color
+            )
+            embed.set_footer(text=f"Server: {interaction.guild.name}")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Autoplay button error: {e}")
+            await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+
+    @discord.ui.button(label="📋 Queue", style=discord.ButtonStyle.secondary, row=1)
+    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            
+            embed = discord.Embed(
+                title="📋 Music Queue",
+                color=EMBED_COLORS['info']
+            )
+            
+            if guild_queue.current:
+                embed.add_field(
+                    name="🎵 Now Playing",
+                    value=f"**{guild_queue.current[:60]}{'...' if len(guild_queue.current) > 60 else ''}**",
+                    inline=False
+                )
+            
+            queue_display = guild_queue.get_queue_display()
+            embed.add_field(name="📝 Up Next", value=queue_display, inline=False)
+            embed.add_field(name="🔀 Auto-Play", value="ON" if guild_queue.is_auto_play else "OFF", inline=True)
+            embed.add_field(name="🔊 Volume", value=f"{guild_queue.get_volume_percentage()}%", inline=True)
+            embed.set_footer(text=f"Server: {interaction.guild.name}")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Queue button error: {e}")
+            await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+
+    @discord.ui.button(label="🔊 Volume+", style=discord.ButtonStyle.success, row=1)
+    async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            old_volume = guild_queue.get_volume_percentage()
+            guild_queue.increase_volume()
+            new_volume = guild_queue.get_volume_percentage()
+            
+            if old_volume != new_volume:
+                # Get current song title for volume restart
+                current_title = current_song_info.get(self.guild_id, "Unknown")
+                
+                # Stop current audio to apply new volume
+                voice_client = interaction.guild.voice_client
+                if voice_client and voice_client.is_playing():
+                    # Calculate current playback position
+                    start_time = song_start_times.get(self.guild_id, time.time())
+                    seek_time = max(0, time.time() - start_time)
+                    voice_client.stop()
+                    
+                    # Restart with new volume from current position
+                    await self.restart_audio_with_volume(interaction, current_title, guild_queue.volume)
+                
+                # Update global volume control
+                await update_global_volume_control(interaction, new_volume, "increased")
+            else:
+                await interaction.response.send_message("🔊 Volume is already at maximum", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Volume up button error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+
+    @discord.ui.button(label="🔉 Volume-", style=discord.ButtonStyle.danger, row=1)
+    async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            old_volume = guild_queue.get_volume_percentage()
+            guild_queue.decrease_volume()
+            new_volume = guild_queue.get_volume_percentage()
+            
+            if old_volume != new_volume:
+                # Get current song title for volume restart
+                current_title = current_song_info.get(self.guild_id, "Unknown")
+                
+                # Stop current audio to apply new volume
+                voice_client = interaction.guild.voice_client
+                if voice_client and voice_client.is_playing():
+                    # Calculate current playback position
+                    start_time = song_start_times.get(self.guild_id, time.time())
+                    seek_time = max(0, time.time() - start_time)
+                    voice_client.stop()
+                    
+                    # Restart with new volume from current position
+                    await self.restart_audio_with_volume(interaction, current_title, guild_queue.volume)
+                
+                # Update global volume control
+                await update_global_volume_control(interaction, new_volume, "decreased")
+            else:
+                await interaction.response.send_message("🔉 Volume is already at minimum", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Volume down button error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
     
+    def get_best_audio_url(self, video_info):
+        """Get best quality audio URL from video info"""
+        try:
+            formats = video_info.get('formats', [])
+            
+            # Priority order: audio-only formats first, then video+audio
+            audio_formats = []
+            video_audio_formats = []
+            
+            for fmt in formats:
+                if fmt.get('acodec') != 'none':
+                    if fmt.get('vcodec') == 'none':  # Audio-only
+                        audio_formats.append(fmt)
+                    else:  # Video + Audio
+                        video_audio_formats.append(fmt)
+            
+            # Sort audio-only formats by quality (prefer higher bitrate/quality)
+            audio_formats.sort(key=lambda x: x.get('abr', 0) or x.get('tbr', 0), reverse=True)
+            
+            # Sort video+audio formats by quality
+            video_audio_formats.sort(key=lambda x: x.get('height', 0), reverse=True)
+            
+            # Prefer audio-only formats for better performance
+            best_formats = audio_formats + video_audio_formats
+            
+            if best_formats:
+                return best_formats[0]['url']
+            
+            # Fallback to the default URL
+            return video_info.get('url', '')
+            
+        except Exception as e:
+            logger.error(f"Error getting best audio URL: {e}")
+            return video_info.get('url', '')
+
     async def restart_audio_with_volume(self, interaction, title, volume):
         """Restart current audio with new volume quickly"""
         try:
