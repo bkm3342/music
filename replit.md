@@ -41,16 +41,27 @@ The bot follows a single-file architecture pattern with clear separation of conc
 - **Multi-Server**: Each server maintains independent queues and settings
 - **Persistence**: No persistent storage (queues reset on bot restart)
 
-### 4. Interactive Music Dashboard
-- **Button Controls**: Pause, Resume, Skip, Auto-Play toggle, Queue view, Clear queue, Stop & Leave
-- **Real-time Updates**: Dynamic button states and server-specific information
-- **User Experience**: Organized layout with visual feedback and ephemeral responses
+### 4. Enhanced Interactive Music Dashboard with Audio Effects
+- **Basic Controls**: Pause, Resume, Skip, Auto-Play toggle, Queue view, Clear queue, Stop & Leave
+- **Audio Effects**: Bass Boost, Nightcore, Slowed + Reverb buttons with real-time application
+- **Volume Controls**: Instant volume adjustment with visual feedback bars
+- **Real-time Updates**: Dynamic button states and server-specific information with effect indicators
+- **User Experience**: Organized 3-row layout with visual feedback and ephemeral responses
 
-### 5. Voice Channel Management
+### 5. Advanced Voice Activity Detection System
+- **Auto-Pause/Resume**: Automatically pauses music when voice channel is empty, resumes when members join
+- **Smart Activity Monitoring**: Detects real-time voice channel member changes
 - **Connection Handling**: Automatic voice channel joining/leaving with multi-server support
 - **Audio Streaming**: Real-time high-quality audio streaming with enhanced error handling
 - **Auto-Disconnect**: Automatically leaves voice channels when inactive for 60 seconds
 - **Server Isolation**: Independent voice connections for each Discord server
+
+### 6. Audio Effects Processing System
+- **Bass Boost**: Enhanced low-frequency amplification with equalizer filters
+- **Nightcore**: Increased tempo and pitch for energetic sound
+- **Slowed + Reverb**: Reduced tempo with atmospheric reverb effects
+- **Real-time Application**: Effects apply to currently playing songs without interruption
+- **Effect Persistence**: Settings maintained per server across song changes
 
 ## Data Flow
 
@@ -122,6 +133,13 @@ Changelog:
 - June 15, 2025: Updated volume controls to edit existing messages instead of creating new ones for cleaner chat
 - June 15, 2025: Added live ping command to monitor bot latency and responsiveness
 - June 15, 2025: Enhanced error handling and state management for better multi-server reliability
+- June 15, 2025: Removed web dashboard interface as requested by user
+- June 15, 2025: Upgraded audio quality to 320k bitrate with enhanced FFmpeg processing for maximum quality
+- June 15, 2025: Implemented advanced voice activity detection with auto-pause/resume functionality
+- June 15, 2025: Added comprehensive audio effects system (Bass Boost, Nightcore, Slowed + Reverb)
+- June 15, 2025: Enhanced music dashboard with 3-row button layout and real-time audio effect controls
+- June 15, 2025: Integrated seamless effect switching without song interruption using background processing
+- June 15, 2025: Added persistent audio effect settings per server with visual feedback indicators
 ```
 
 ## User Preferences

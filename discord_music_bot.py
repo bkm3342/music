@@ -977,7 +977,7 @@ class MusicDashboardView(discord.ui.View):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
     
-    @discord.ui.button(emoji=get_emoji('volume_down'), label="Vol-", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=get_emoji('volume_down'), label="Vol-", style=discord.ButtonStyle.secondary, row=2)
     async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
@@ -1028,6 +1028,63 @@ class MusicDashboardView(discord.ui.View):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
     
+    async def restart_audio_with_effect(self, interaction, title, effect):
+        """Restart current audio with new audio effect"""
+        try:
+            guild_id = interaction.guild.id
+            guild_queue = get_guild_queue(guild_id)
+            
+            # Get current playback position
+            current_time = time.time()
+            start_time = song_start_times.get(guild_id, current_time)
+            seek_time = max(0, current_time - start_time)
+            
+            # Use a background task to restart audio with effect
+            asyncio.create_task(self._restart_audio_with_effect_background(guild_id, title, guild_queue.volume, effect, seek_time))
+        except Exception as e:
+            logger.error(f"Error scheduling audio restart with effect: {e}")
+
+    async def _restart_audio_with_effect_background(self, guild_id, title, volume, effect, seek_time=0):
+        """Background task to restart audio with new effect from specific time"""
+        try:
+            await asyncio.sleep(0.05)
+            
+            guild = bot.get_guild(guild_id)
+            if guild and guild.voice_client:
+                voice_client = guild.voice_client
+                
+                # Stop current audio
+                if voice_client.is_playing():
+                    voice_client.stop()
+                
+                # Get audio URL (use cached if available)
+                audio_url = current_audio_urls.get(guild_id)
+                if not audio_url:
+                    search_query = f"{title} song"
+                    info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+                    
+                    if info and info.get('entries'):
+                        video_info = info['entries'][0]
+                        audio_url = self.get_best_audio_url(video_info)
+                        current_audio_urls[guild_id] = audio_url
+                
+                if audio_url:
+                    # Create new audio source with effect and volume
+                    source = discord.FFmpegPCMAudio(
+                        audio_url,
+                        executable=FFMPEG_PATH,
+                        **get_ffmpeg_options(volume, seek_time, effect)
+                    )
+                    
+                    # Start playing with new effect from specified time
+                    voice_client.play(source)
+                    current_song_info[guild_id] = title
+                    # Update start time to account for the seek
+                    song_start_times[guild_id] = time.time() - seek_time
+                    logger.info(f"Audio effect applied: {effect or 'Normal'} for: {title} (resumed from {int(seek_time)}s)")
+        except Exception as e:
+            logger.error(f"Error in background audio restart with effect: {e}")
+
     async def restart_audio_with_volume(self, interaction, title, volume):
         """Restart current audio with new volume quickly"""
         try:
