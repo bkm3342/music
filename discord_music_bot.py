@@ -206,6 +206,7 @@ played_songs_history = {}  # Track played songs to avoid repetition
 volume_messages = {}  # Track volume messages for editing
 paused_guilds = set()  # Track paused guilds to prevent auto-play
 manually_skipped_guilds = set()  # Track guilds where skip button was used
+effect_changing_guilds = set()  # Track guilds changing audio effects to prevent auto-play
 
 # Performance optimization storage
 cache_expire_time = {}  # Track cache expiration times
@@ -840,6 +841,9 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             
             if voice_client and voice_client.is_playing():
+                # Set flag to prevent auto-play during effect change
+                effect_changing_guilds.add(self.guild_id)
+                
                 # Toggle bass boost effect
                 current_effect = guild_queue.audio_effect
                 new_effect = None if current_effect == "bass_boost" else "bass_boost"
@@ -871,6 +875,9 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             
             if voice_client and voice_client.is_playing():
+                # Set flag to prevent auto-play during effect change
+                effect_changing_guilds.add(self.guild_id)
+                
                 # Toggle nightcore effect
                 current_effect = guild_queue.audio_effect
                 new_effect = None if current_effect == "nightcore" else "nightcore"
@@ -902,6 +909,9 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             
             if voice_client and voice_client.is_playing():
+                # Set flag to prevent auto-play during effect change
+                effect_changing_guilds.add(self.guild_id)
+                
                 # Toggle slowed + reverb effect
                 current_effect = guild_queue.audio_effect
                 new_effect = None if current_effect == "slowed_reverb" else "slowed_reverb"
@@ -1082,8 +1092,13 @@ class MusicDashboardView(discord.ui.View):
                     # Update start time to account for the seek
                     song_start_times[guild_id] = time.time() - seek_time
                     logger.info(f"Audio effect applied: {effect or 'Normal'} for: {title} (resumed from {int(seek_time)}s)")
+                    
+                    # Clear effect changing flag after successful application
+                    effect_changing_guilds.discard(guild_id)
         except Exception as e:
             logger.error(f"Error in background audio restart with effect: {e}")
+            # Clear flag even on error to prevent permanent blocking
+            effect_changing_guilds.discard(guild_id)
 
     async def restart_audio_with_volume(self, interaction, title, volume):
         """Restart current audio with new volume quickly"""
@@ -1528,8 +1543,8 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
         if voice_client.is_playing():
             voice_client.stop()
         def after_playing(error):
-            if error is None and interaction.guild.id not in paused_guilds:
-                # Only trigger auto-progression if not manually skipped
+            if error is None and interaction.guild.id not in paused_guilds and interaction.guild.id not in effect_changing_guilds:
+                # Only trigger auto-progression if not manually skipped or changing effects
                 asyncio.run_coroutine_threadsafe(wait_for_song_completion(interaction), bot.loop)
         
         voice_client.play(source, after=after_playing)
