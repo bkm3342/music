@@ -350,8 +350,16 @@ class MusicDashboardView(discord.ui.View):
             guild_queue = get_guild_queue(self.guild_id)
             new_volume = guild_queue.increase_volume()
             
-            # Respond with immediate volume feedback - no audio restart
-            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}% (will apply to next song)", ephemeral=True)
+            # Apply volume immediately to current playing song
+            voice_client = interaction.guild.voice_client
+            if voice_client and voice_client.is_playing():
+                current_song = current_song_info.get(interaction.guild.id)
+                if current_song:
+                    # Stop current audio and restart with new volume
+                    voice_client.stop()
+                    await self.restart_audio_with_volume(interaction, current_song, guild_queue.volume)
+            
+            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
             
         except Exception as e:
             logger.error(f"Volume up error: {e}")
@@ -367,8 +375,16 @@ class MusicDashboardView(discord.ui.View):
             guild_queue = get_guild_queue(self.guild_id)
             new_volume = guild_queue.decrease_volume()
             
-            # Respond with immediate volume feedback - no audio restart
-            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}% (will apply to next song)", ephemeral=True)
+            # Apply volume immediately to current playing song
+            voice_client = interaction.guild.voice_client
+            if voice_client and voice_client.is_playing():
+                current_song = current_song_info.get(interaction.guild.id)
+                if current_song:
+                    # Stop current audio and restart with new volume
+                    voice_client.stop()
+                    await self.restart_audio_with_volume(interaction, current_song, guild_queue.volume)
+            
+            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
             
         except Exception as e:
             logger.error(f"Volume down error: {e}")
@@ -389,29 +405,32 @@ class MusicDashboardView(discord.ui.View):
     async def _restart_audio_background(self, guild_id, title, volume):
         """Background task to restart audio with new volume"""
         try:
-            await asyncio.sleep(0.1)  # Minimal delay to ensure stop completed
+            await asyncio.sleep(0.05)  # Minimal delay to ensure stop completed
             
-            # Search for the current song again to get fresh URL
-            search_query = f"{title} song"
-            info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
-            
-            if info and info.get('entries'):
-                video_info = info['entries'][0]
-                audio_url = self.get_best_audio_url(video_info)
-                if audio_url:
-                    # Get voice client from guild
-                    guild = bot.get_guild(guild_id)
-                    if guild and guild.voice_client:
-                        voice_client = guild.voice_client
-                        if not voice_client.is_playing():
-                            source = discord.FFmpegPCMAudio(
-                                audio_url,
-                                executable=FFMPEG_PATH,
-                                **get_ffmpeg_options(volume)
-                            )
-                            voice_client.play(source)
-                            current_song_info[guild_id] = title
-                            logger.info(f"Volume changed to {int(volume*100)}% for: {title}")
+            # Get voice client from guild
+            guild = bot.get_guild(guild_id)
+            if guild and guild.voice_client:
+                voice_client = guild.voice_client
+                
+                # Search for the current song again to get fresh URL
+                search_query = f"{title} song"
+                info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+                
+                if info and info.get('entries'):
+                    video_info = info['entries'][0]
+                    audio_url = self.get_best_audio_url(video_info)
+                    if audio_url:
+                        # Create new audio source with updated volume
+                        source = discord.FFmpegPCMAudio(
+                            audio_url,
+                            executable=FFMPEG_PATH,
+                            **get_ffmpeg_options(volume)
+                        )
+                        
+                        # Start playing with new volume
+                        voice_client.play(source)
+                        current_song_info[guild_id] = title
+                        logger.info(f"Volume instantly changed to {int(volume*100)}% for: {title}")
         except Exception as e:
             logger.error(f"Error in background audio restart: {e}")
         
