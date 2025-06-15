@@ -54,7 +54,7 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # ---- YouTube & FFmpeg Config ----
-FFMPEG_PATH = 'ffmpeg'  # Assumes ffmpeg is in PATH
+FFMPEG_PATH = 'ffmpeg'
 
 ytdl_format_options = {
     'format': 'bestaudio/best',
@@ -73,14 +73,15 @@ ytdl_format_options = {
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
-# Global song queue
-song_queue = []
+# Global storage
 current_guild_queues = {}
+current_song_info = {}
 
 class MusicQueue:
     def __init__(self):
         self.queue = []
         self.current = None
+        self.is_auto_play = True
         
     def add(self, item):
         self.queue.append(item)
@@ -100,11 +101,103 @@ class MusicQueue:
         
     def size(self):
         return len(self.queue)
+        
+    def toggle_auto_play(self):
+        self.is_auto_play = not self.is_auto_play
+        return self.is_auto_play
 
 def get_guild_queue(guild_id):
     if guild_id not in current_guild_queues:
         current_guild_queues[guild_id] = MusicQueue()
     return current_guild_queues[guild_id]
+
+# Music Player Dashboard View
+class MusicDashboardView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        
+    @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.secondary, row=0)
+    async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        voice_client = interaction.guild.voice_client
+        if voice_client and voice_client.is_playing():
+            voice_client.pause()
+            await interaction.response.send_message("⏸️ Music paused", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+            
+    @discord.ui.button(label="▶️ Resume", style=discord.ButtonStyle.success, row=0)
+    async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        voice_client = interaction.guild.voice_client
+        if voice_client and voice_client.is_paused():
+            voice_client.resume()
+            await interaction.response.send_message("▶️ Music resumed", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nothing is paused", ephemeral=True)
+            
+    @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.primary, row=0)
+    async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        voice_client = interaction.guild.voice_client
+        if voice_client and voice_client.is_playing():
+            voice_client.stop()
+            await interaction.response.send_message("⏭️ Song skipped", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+            
+    @discord.ui.button(label="🔄 Auto-Play: ON", style=discord.ButtonStyle.success, row=1)
+    async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_queue = get_guild_queue(self.guild_id)
+        is_on = guild_queue.toggle_auto_play()
+        
+        if is_on:
+            button.label = "🔄 Auto-Play: ON"
+            button.style = discord.ButtonStyle.success
+        else:
+            button.label = "🔄 Auto-Play: OFF"
+            button.style = discord.ButtonStyle.danger
+            
+        await interaction.response.edit_message(view=self)
+            
+    @discord.ui.button(label="📜 Queue", style=discord.ButtonStyle.secondary, row=1)
+    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_queue = get_guild_queue(self.guild_id)
+        
+        if guild_queue.is_empty():
+            await interaction.response.send_message("❌ Queue is empty", ephemeral=True)
+            return
+        
+        embed = discord.Embed(title="🎵 Current Queue", color=0x00ff00)
+        
+        queue_list = []
+        for i, song in enumerate(guild_queue.queue[:10]):
+            queue_list.append(f"{i + 1}. {song}")
+        
+        if len(guild_queue.queue) > 10:
+            queue_list.append(f"... and {len(guild_queue.queue) - 10} more songs")
+        
+        embed.description = "\n".join(queue_list) if queue_list else "Queue is empty"
+        embed.add_field(name="Total Songs", value=str(guild_queue.size()), inline=True)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    @discord.ui.button(label="🗑️ Clear Queue", style=discord.ButtonStyle.danger, row=1)
+    async def clear_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_queue = get_guild_queue(self.guild_id)
+        guild_queue.clear()
+        await interaction.response.send_message("🗑️ Queue cleared", ephemeral=True)
+        
+    @discord.ui.button(label="🔇 Stop & Leave", style=discord.ButtonStyle.danger, row=2)
+    async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        voice_client = interaction.guild.voice_client
+        if voice_client:
+            if voice_client.is_playing():
+                voice_client.stop()
+            await voice_client.disconnect()
+            guild_queue = get_guild_queue(self.guild_id)
+            guild_queue.clear()
+            await interaction.response.send_message("🔇 Stopped music and left voice channel", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Not connected to any voice channel", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -139,9 +232,16 @@ async def play(interaction: discord.Interaction, query: str):
     guild_queue = get_guild_queue(interaction.guild.id)
     
     # If something is already playing, add to queue
-    if interaction.guild.voice_client.is_playing():
+    if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
         guild_queue.add(query)
-        await interaction.followup.send(f"🔥 Added to queue: {query} (Position: {guild_queue.size()})")
+        embed = discord.Embed(
+            title="🔥 Added to Queue",
+            description=f"**{query}**",
+            color=0xff9500
+        )
+        embed.add_field(name="Position", value=f"{guild_queue.size()}", inline=True)
+        embed.add_field(name="Queue Size", value=f"{guild_queue.size()} songs", inline=True)
+        await interaction.followup.send(embed=embed)
     else:
         await start_playback(interaction, query)
 
@@ -155,7 +255,6 @@ async def start_playback(interaction, query):
         elif 'youtube.com' in query or 'youtu.be' in query:
             await play_youtube(interaction, query)
         else:
-            # If it's not a URL, treat it as a song name search
             await play_youtube_search(interaction, query)
             
         # Wait for current song to finish, then play next in queue
@@ -171,15 +270,14 @@ async def wait_for_song_completion(interaction):
         await asyncio.sleep(1)
     
     guild_queue = get_guild_queue(interaction.guild.id)
-    if not guild_queue.is_empty():
+    if guild_queue.is_auto_play and not guild_queue.is_empty():
         next_song = guild_queue.next()
-        await interaction.followup.send(f"🎵 Now Playing Next: {next_song}")
+        await interaction.followup.send(f"🎵 Auto-Playing Next: {next_song}")
         await start_playback(interaction, next_song)
 
 async def play_youtube(interaction, url_or_query):
     """Play audio from YouTube"""
     try:
-        # If it's not a URL, treat it as a search query
         if not ('youtube.com' in url_or_query or 'youtu.be' in url_or_query):
             url_or_query = f"ytsearch:{url_or_query}"
             
@@ -191,7 +289,6 @@ async def play_youtube(interaction, url_or_query):
             return
             
         if 'entries' in info:
-            # Search result
             if not info['entries']:
                 await interaction.followup.send("❌ No results found for your search.")
                 return
@@ -200,30 +297,26 @@ async def play_youtube(interaction, url_or_query):
         if not info:
             await interaction.followup.send("❌ Could not find video information.")
             return
-            
+        
+        title = info.get('title', 'Unknown Title')
+        webpage_url = info.get('webpage_url', '')
+        duration = info.get('duration', 0)
+        
         # Get the best audio format
         formats = info.get('formats', [])
         audio_url = None
         
-        # Try to find best audio format
         for fmt in formats:
             if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
                 audio_url = fmt.get('url')
                 break
                 
-        # Fallback to the main URL
         if not audio_url:
             audio_url = info.get('url')
             
         if not audio_url:
             await interaction.followup.send("❌ Could not find audio stream.")
             return
-        
-        title = info.get('title', 'Unknown Title')
-        webpage_url = info.get('webpage_url', '')
-        duration = info.get('duration', 0)
-        
-        logger.info(f"Playing: {title} from {audio_url}")
         
         # Format duration
         if duration:
@@ -244,6 +337,9 @@ async def play_youtube(interaction, url_or_query):
             voice_client.stop()
         voice_client.play(source)
         
+        # Store current song info
+        current_song_info[interaction.guild.id] = title
+        
         embed = discord.Embed(
             title="🎵 Now Playing",
             description=f"[{title}]({webpage_url})",
@@ -251,12 +347,16 @@ async def play_youtube(interaction, url_or_query):
         )
         embed.add_field(name="Duration", value=duration_str, inline=True)
         
-        await interaction.followup.send(embed=embed)
+        # Show dashboard with music controls
+        guild_queue = get_guild_queue(interaction.guild.id)
+        embed.add_field(name="Queue", value=f"{guild_queue.size()} songs waiting", inline=True)
+        embed.add_field(name="Auto-Play", value="🔄 ON" if guild_queue.is_auto_play else "❌ OFF", inline=True)
+        
+        view = MusicDashboardView(interaction.guild.id)
+        await interaction.followup.send(embed=embed, view=view)
         
     except Exception as e:
         logger.error(f"YouTube playback error: {str(e)}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
         await interaction.followup.send(f"❌ YouTube error: {str(e)}")
 
 async def play_spotify_track(interaction, url):
@@ -272,7 +372,6 @@ async def play_spotify_track(interaction, url):
         artist_name = track['artists'][0]['name']
         spotify_link = track['external_urls']['spotify']
         
-        # Search for the track on YouTube
         query = f"{track_name} {artist_name}"
         await play_youtube_search(interaction, query, spotify_link, track_name, artist_name)
 
@@ -298,7 +397,6 @@ async def play_spotify_playlist(interaction, url):
 
         guild_queue = get_guild_queue(interaction.guild.id)
         
-        # Add all tracks to queue
         track_count = 0
         for track_item in tracks:
             if track_item['track']:
@@ -316,7 +414,6 @@ async def play_spotify_playlist(interaction, url):
         )
         await interaction.followup.send(embed=embed)
         
-        # If nothing is playing, start with first track
         if not interaction.guild.voice_client.is_playing():
             next_song = guild_queue.next()
             if next_song:
@@ -329,7 +426,6 @@ async def play_spotify_playlist(interaction, url):
 async def play_youtube_search(interaction, query, spotify_link=None, track_name=None, artist_name=None):
     """Search and play from YouTube"""
     try:
-        # Add "song" to the search if it doesn't contain common music keywords
         search_query = query
         music_keywords = ['song', 'music', 'audio', 'track', 'lyrics', 'official']
         if not any(keyword in query.lower() for keyword in music_keywords):
@@ -343,17 +439,14 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
 
         video_info = info['entries'][0]
         
-        # Get the best audio format
         formats = video_info.get('formats', [])
         audio_url = None
         
-        # Try to find best audio format
         for fmt in formats:
             if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
                 audio_url = fmt.get('url')
                 break
                 
-        # Fallback to the main URL
         if not audio_url:
             audio_url = video_info.get('url')
             
@@ -365,7 +458,6 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
         webpage_url = video_info.get('webpage_url', '')
         duration = video_info.get('duration', 0)
         
-        # Format duration
         if duration:
             minutes, seconds = divmod(duration, 60)
             duration_str = f"{minutes}:{seconds:02d}"
@@ -384,7 +476,9 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
             voice_client.stop()
         voice_client.play(source)
         
+        # Store current song info
         if spotify_link and track_name and artist_name:
+            current_song_info[interaction.guild.id] = f"{track_name} by {artist_name}"
             embed = discord.Embed(
                 title="🎵 Now Playing (from Spotify)",
                 description=f"**{track_name}** by **{artist_name}**",
@@ -393,8 +487,8 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
             embed.add_field(name="Spotify Link", value=f"[Open in Spotify]({spotify_link})", inline=False)
             embed.add_field(name="Playing from YouTube", value=f"[{title}]({webpage_url})", inline=False)
             embed.add_field(name="Duration", value=duration_str, inline=True)
-            await interaction.followup.send(embed=embed)
         else:
+            current_song_info[interaction.guild.id] = title
             embed = discord.Embed(
                 title="🎵 Now Playing",
                 description=f"[{title}]({webpage_url})",
@@ -402,42 +496,66 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
             )
             embed.add_field(name="Duration", value=duration_str, inline=True)
             embed.add_field(name="Searched for", value=f"`{query}`", inline=True)
-            await interaction.followup.send(embed=embed)
+        
+        # Show dashboard with music controls
+        guild_queue = get_guild_queue(interaction.guild.id)
+        embed.add_field(name="Queue", value=f"{guild_queue.size()} songs waiting", inline=True)
+        embed.add_field(name="Auto-Play", value="🔄 ON" if guild_queue.is_auto_play else "❌ OFF", inline=True)
+        
+        view = MusicDashboardView(interaction.guild.id)
+        await interaction.followup.send(embed=embed, view=view)
 
     except Exception as e:
         logger.error(f"YouTube search error: {e}")
-        import traceback
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        await interaction.followup.send(f"❌ YouTube search error: {e}")
+        await interaction.followup.send(f"❌ YouTube error: {e}")
 
 def extract_spotify_track_id(url):
     """Extract Spotify track ID from URL"""
-    match = re.search(r"track/([a-zA-Z0-9]+)", url)
+    match = re.search(r'track/([a-zA-Z0-9]+)', url)
     return match.group(1) if match else None
 
 def extract_spotify_playlist_id(url):
     """Extract Spotify playlist ID from URL"""
-    match = re.search(r"playlist/([a-zA-Z0-9]+)", url)
+    match = re.search(r'playlist/([a-zA-Z0-9]+)', url)
     return match.group(1) if match else None
 
-# ---- Slash Commands ----
+@bot.tree.command(name='dashboard', description="Open the music player dashboard with all controls")
+async def dashboard(interaction: discord.Interaction):
+    """Show the interactive music player dashboard"""
+    guild_queue = get_guild_queue(interaction.guild.id)
+    voice_client = interaction.guild.voice_client
+    
+    embed = discord.Embed(title="🎵 Music Player Dashboard", color=0x00ff00)
+    
+    if voice_client and voice_client.is_playing():
+        current_song = current_song_info.get(interaction.guild.id, "Unknown Song")
+        embed.add_field(name="🎵 Now Playing", value=current_song, inline=False)
+        embed.add_field(name="Status", value="▶️ Playing", inline=True)
+    elif voice_client and voice_client.is_paused():
+        current_song = current_song_info.get(interaction.guild.id, "Unknown Song")
+        embed.add_field(name="🎵 Current Song", value=current_song, inline=False)
+        embed.add_field(name="Status", value="⏸️ Paused", inline=True)
+    else:
+        embed.add_field(name="Status", value="⏹️ Stopped", inline=True)
+    
+    embed.add_field(name="Queue Size", value=f"{guild_queue.size()} songs", inline=True)
+    embed.add_field(name="Auto-Play", value="🔄 ON" if guild_queue.is_auto_play else "❌ OFF", inline=True)
+    
+    view = MusicDashboardView(interaction.guild.id)
+    await interaction.response.send_message(embed=embed, view=view)
 
 @bot.tree.command(name='skip', description="Skip the current song")
 async def skip(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
-    if not voice_client or not voice_client.is_playing():
-        await interaction.response.send_message("❌ Nothing is playing.", ephemeral=True)
-        return
-
-    voice_client.stop()
-    guild_queue = get_guild_queue(interaction.guild.id)
-    
-    if not guild_queue.is_empty():
-        next_song = guild_queue.next()
-        await interaction.response.send_message(f"⏭️ Skipped. Now Playing: {next_song}")
-        await start_playback(interaction, next_song)
+    if voice_client and voice_client.is_playing():
+        voice_client.stop()
+        guild_queue = get_guild_queue(interaction.guild.id)
+        if not guild_queue.is_empty():
+            await interaction.response.send_message("⏭️ Skipped. Playing next song...")
+        else:
+            await interaction.response.send_message("⏭️ Skipped. No more songs in queue.")
     else:
-        await interaction.response.send_message("⏭️ Skipped. No more songs in queue.")
+        await interaction.response.send_message("❌ Nothing is playing.", ephemeral=True)
 
 @bot.tree.command(name='queue', description="Show the current song queue")
 async def queue_command(interaction: discord.Interaction):
@@ -450,7 +568,7 @@ async def queue_command(interaction: discord.Interaction):
     embed = discord.Embed(title="🎵 Current Queue", color=0x00ff00)
     
     queue_list = []
-    for i, song in enumerate(guild_queue.queue[:10]):  # Show first 10 songs
+    for i, song in enumerate(guild_queue.queue[:10]):
         queue_list.append(f"{i + 1}. {song}")
     
     if len(guild_queue.queue) > 10:
@@ -493,7 +611,7 @@ async def join(interaction: discord.Interaction):
         await interaction.user.voice.channel.connect()
         await interaction.response.send_message(f"🎧 Joined {interaction.user.voice.channel.name}")
     except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to join voice channel: {e}")
+        await interaction.response.send_message(f"❌ Failed to join: {e}")
 
 @bot.tree.command(name='leave', description="Leave the voice channel")
 async def leave(interaction: discord.Interaction):
@@ -502,7 +620,7 @@ async def leave(interaction: discord.Interaction):
         guild_queue = get_guild_queue(interaction.guild.id)
         guild_queue.clear()
         await voice_client.disconnect()
-        await interaction.response.send_message("👋 Left the voice channel and cleared the queue.")
+        await interaction.response.send_message("👋 Left the voice channel and cleared queue.")
     else:
         await interaction.response.send_message("❌ Not connected to a voice channel.", ephemeral=True)
 
@@ -510,66 +628,61 @@ async def leave(interaction: discord.Interaction):
 async def clear(interaction: discord.Interaction):
     guild_queue = get_guild_queue(interaction.guild.id)
     guild_queue.clear()
-    await interaction.response.send_message("🧹 Queue cleared.")
+    await interaction.response.send_message("🗑️ Queue cleared.")
 
-@bot.tree.command(name='stop', description="Stop playback and clear the queue")
+@bot.tree.command(name='stop', description="Stop music and clear queue")
 async def stop(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
-    guild_queue = get_guild_queue(interaction.guild.id)
-    
-    guild_queue.clear()
     if voice_client and voice_client.is_playing():
         voice_client.stop()
-    
-    await interaction.response.send_message("🛑 Stopped playback and cleared queue.")
+        guild_queue = get_guild_queue(interaction.guild.id)
+        guild_queue.clear()
+        await interaction.response.send_message("⏹️ Stopped music and cleared queue.")
+    else:
+        await interaction.response.send_message("❌ Nothing is playing.", ephemeral=True)
 
-@bot.tree.command(name='nowplaying', description="Show information about the current song")
+@bot.tree.command(name='nowplaying', description="Show what's currently playing")
 async def nowplaying(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
-    if not voice_client or not voice_client.is_playing():
+    if voice_client and voice_client.is_playing():
+        current_song = current_song_info.get(interaction.guild.id, "Unknown Song")
+        embed = discord.Embed(
+            title="🎵 Now Playing",
+            description=current_song,
+            color=0x00ff00
+        )
+        await interaction.response.send_message(embed=embed)
+    else:
         await interaction.response.send_message("❌ Nothing is currently playing.", ephemeral=True)
-        return
-    
-    guild_queue = get_guild_queue(interaction.guild.id)
-    current_song = guild_queue.current if guild_queue.current else "Unknown"
-    
-    embed = discord.Embed(
-        title="🎵 Now Playing",
-        description=current_song,
-        color=0x00ff00
-    )
-    embed.add_field(name="Queue Length", value=str(guild_queue.size()), inline=True)
-    
-    await interaction.response.send_message(embed=embed)
 
-# Error handling
 @bot.event
 async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
     logger.error(f"Command error: {error}")
 
 @bot.event
 async def on_application_command_error(interaction: discord.Interaction, error):
-    logger.error(f"Slash command error: {error}")
+    logger.error(f"Application command error: {error}")
     if not interaction.response.is_done():
-        await interaction.response.send_message(f"❌ An error occurred: {error}", ephemeral=True)
+        try:
+            await interaction.response.send_message(f"❌ An error occurred: {error}", ephemeral=True)
+        except:
+            pass
 
-# Voice client error handling
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # If bot is alone in voice channel, disconnect
     if member == bot.user:
         return
     
     voice_client = member.guild.voice_client
-    if voice_client and len(voice_client.channel.members) == 1:
-        guild_queue = get_guild_queue(member.guild.id)
-        guild_queue.clear()
-        await voice_client.disconnect()
-        logger.info("Left voice channel - no other members present")
+    if voice_client and voice_client.channel:
+        if len([m for m in voice_client.channel.members if not m.bot]) == 0:
+            await asyncio.sleep(60)
+            if voice_client and len([m for m in voice_client.channel.members if not m.bot]) == 0:
+                await voice_client.disconnect()
+                guild_queue = get_guild_queue(member.guild.id)
+                guild_queue.clear()
 
 if __name__ == "__main__":
-    # Start the bot
-    try:
-        bot.run(DISCORD_BOT_TOKEN)
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
+    bot.run(DISCORD_BOT_TOKEN)
