@@ -23,25 +23,34 @@ The bot follows a single-file architecture pattern with clear separation of conc
 ## Key Components
 
 ### 1. Discord Bot Core (`discord_music_bot.py`)
-- **Purpose**: Main bot application with command handlers
-- **Architecture**: Uses discord.py's command framework with slash commands
+- **Purpose**: Main bot application with command handlers and interactive dashboard
+- **Architecture**: Uses discord.py's command framework with slash commands and UI components
 - **Authentication**: Token-based authentication via environment variables
 - **Intents**: Configured for message content and voice state management
+- **Multi-Server Support**: Isolated queues and settings per Discord server
 
-### 2. Audio Processing Pipeline
-- **YouTube Integration**: yt-dlp for audio extraction and streaming
+### 2. Enhanced Audio Processing Pipeline
+- **YouTube Integration**: yt-dlp with optimized format selection for high-quality audio
 - **Spotify Integration**: spotipy for track/playlist metadata, searches YouTube for actual audio
-- **FFmpeg**: Handles audio encoding and streaming to Discord voice channels
+- **FFmpeg**: Enhanced audio encoding with 192k bitrate, 48kHz sample rate, and volume optimization
+- **Audio Quality**: Prioritizes M4A formats and high-quality streams for better sound
 
-### 3. Queue Management System
-- **Design**: In-memory queue management for each Discord server
-- **Features**: Queue progression, skip functionality, status display
+### 3. Advanced Queue Management System
+- **Design**: In-memory queue management isolated per Discord server
+- **Features**: Auto-play toggle, queue progression, skip functionality, status display
+- **Multi-Server**: Each server maintains independent queues and settings
 - **Persistence**: No persistent storage (queues reset on bot restart)
 
-### 4. Voice Channel Management
-- **Connection Handling**: Automatic voice channel joining/leaving
-- **Audio Streaming**: Real-time audio streaming with queue management
-- **Error Handling**: Graceful handling of connection issues and audio failures
+### 4. Interactive Music Dashboard
+- **Button Controls**: Pause, Resume, Skip, Auto-Play toggle, Queue view, Clear queue, Stop & Leave
+- **Real-time Updates**: Dynamic button states and server-specific information
+- **User Experience**: Organized layout with visual feedback and ephemeral responses
+
+### 5. Voice Channel Management
+- **Connection Handling**: Automatic voice channel joining/leaving with multi-server support
+- **Audio Streaming**: Real-time high-quality audio streaming with enhanced error handling
+- **Auto-Disconnect**: Automatically leaves voice channels when inactive for 60 seconds
+- **Server Isolation**: Independent voice connections for each Discord server
 
 ## Data Flow
 
@@ -98,6 +107,10 @@ Changelog:
 - June 15, 2025: Added interactive music player dashboard with button controls
 - June 15, 2025: Implemented auto-play toggle functionality for queue management
 - June 15, 2025: Created comprehensive music control interface with pause/resume/skip/stop buttons
+- June 15, 2025: Enhanced multi-server support with isolated queues and settings per Discord server
+- June 15, 2025: Upgraded audio quality with 192k bitrate, 48kHz sample rate, and M4A format priority
+- June 15, 2025: Fixed interaction acknowledgment errors and improved error handling across all commands
+- June 15, 2025: Added auto-disconnect feature and server-specific voice channel management
 ```
 
 ## User Preferences
