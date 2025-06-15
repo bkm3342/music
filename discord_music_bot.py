@@ -83,8 +83,58 @@ def get_ffmpeg_options(volume=0.5, seek_time=0):
     seek_option = f'-ss {int(seek_time)}' if seek_time >= 1 else ''
     return {
         'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M {seek_option}',
-        'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 192k'
+        'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 256k -bufsize 2M'
     }
+
+# Enhanced Animated Emojis
+ANIMATED_EMOJIS = {
+    'play': '<a:music_play:1234567890123456789>',
+    'pause': '<a:music_pause:1234567890123456789>',
+    'stop': '<a:music_stop:1234567890123456789>',
+    'skip': '<a:music_skip:1234567890123456789>',
+    'queue': '<a:music_queue:1234567890123456789>',
+    'volume_up': '<a:volume_up:1234567890123456789>',
+    'volume_down': '<a:volume_down:1234567890123456789>',
+    'autoplay': '<a:autoplay:1234567890123456789>',
+    'loading': '<a:loading:1234567890123456789>',
+    'success': '<a:success:1234567890123456789>',
+    'error': '<a:error:1234567890123456789>',
+    'music_note': '<a:music_note:1234567890123456789>',
+    'sound_wave': '<a:sound_wave:1234567890123456789>'
+}
+
+# Fallback static emojis if animated ones aren't available
+STATIC_EMOJIS = {
+    'play': '▶️',
+    'pause': '⏸️',
+    'stop': '⏹️',
+    'skip': '⏭️',
+    'queue': '📜',
+    'volume_up': '🔊',
+    'volume_down': '🔉',
+    'autoplay': '🔄',
+    'loading': '⏳',
+    'success': '✅',
+    'error': '❌',
+    'music_note': '🎵',
+    'sound_wave': '〰️'
+}
+
+def get_emoji(name):
+    """Get animated emoji with fallback to static"""
+    return ANIMATED_EMOJIS.get(name, STATIC_EMOJIS.get(name, '🎵'))
+
+# Enhanced embed colors
+EMBED_COLORS = {
+    'playing': 0x00ff41,      # Bright green
+    'queue': 0x3498db,        # Blue  
+    'paused': 0xf39c12,       # Orange
+    'stopped': 0xe74c3c,      # Red
+    'error': 0x992d22,        # Dark red
+    'info': 0x9b59b6,         # Purple
+    'success': 0x27ae60,      # Green
+    'warning': 0xf1c40f       # Yellow
+}
 
 # Global storage - separated by guild for multi-server support
 current_guild_queues = {}
@@ -179,6 +229,9 @@ class MusicQueue:
         self.loop_current = False
         self.loop_queue = False
         self.volume = 0.5  # Default volume (50%)
+        self.max_volume = 1.0
+        self.min_volume = 0.1
+        self.volume_step = 0.1
         
     def add(self, item):
         self.queue.append(item)
@@ -198,6 +251,22 @@ class MusicQueue:
         
     def size(self):
         return len(self.queue)
+        
+    def get_queue_display(self, max_items=10):
+        """Get formatted queue display for embeds"""
+        if not self.queue:
+            return "Queue is empty"
+        
+        display_items = []
+        for i, item in enumerate(self.queue[:max_items], 1):
+            # Truncate long titles
+            title = item[:50] + "..." if len(item) > 50 else item
+            display_items.append(f"`{i}.` {title}")
+        
+        if len(self.queue) > max_items:
+            display_items.append(f"... and {len(self.queue) - max_items} more songs")
+        
+        return "\n".join(display_items)
         
     def toggle_auto_play(self):
         self.is_auto_play = not self.is_auto_play
@@ -225,29 +294,53 @@ class MusicDashboardView(discord.ui.View):
         super().__init__(timeout=300)
         self.guild_id = guild_id
         
-    @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(emoji=get_emoji('pause'), label="Pause", style=discord.ButtonStyle.secondary, row=0)
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_playing():
                 voice_client.pause()
-                paused_guilds.add(interaction.guild.id)  # Track paused state
-                await interaction.response.send_message("⏸️ Music paused")
+                paused_guilds.add(interaction.guild.id)
+                
+                embed = discord.Embed(
+                    title=f"{get_emoji('pause')} Music Paused",
+                    description="Audio playback has been paused",
+                    color=EMBED_COLORS['paused']
+                )
+                embed.set_footer(text=f"Server: {interaction.guild.name}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
-                await interaction.response.send_message("❌ Nothing is playing")
+                embed = discord.Embed(
+                    title=f"{get_emoji('error')} Nothing Playing",
+                    description="No audio is currently playing",
+                    color=EMBED_COLORS['error']
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Pause button error: {e}")
             if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error occurred")
+                embed = discord.Embed(
+                    title=f"{get_emoji('error')} Error Occurred",
+                    description="Failed to pause audio",
+                    color=EMBED_COLORS['error']
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             
-    @discord.ui.button(label="▶️ Resume", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(emoji=get_emoji('play'), label="Resume", style=discord.ButtonStyle.success, row=0)
     async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_paused():
                 voice_client.resume()
-                paused_guilds.discard(interaction.guild.id)  # Remove from paused state
-                await interaction.response.send_message("▶️ Music resumed")
+                paused_guilds.discard(interaction.guild.id)
+                
+                embed = discord.Embed(
+                    title=f"{get_emoji('play')} Music Resumed",
+                    description="Audio playback has been resumed",
+                    color=EMBED_COLORS['playing']
+                )
+                embed.set_footer(text=f"Server: {interaction.guild.name}")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Nothing is paused")
         except Exception as e:
@@ -255,24 +348,27 @@ class MusicDashboardView(discord.ui.View):
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ Error occurred")
             
-    @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(emoji=get_emoji('skip'), label="Skip", style=discord.ButtonStyle.primary, row=0)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             voice_client = interaction.guild.voice_client
             guild_queue = get_guild_queue(self.guild_id)
             
             if voice_client and voice_client.is_playing():
-                # Mark this guild as manually skipped to prevent auto-progression interference
                 manually_skipped_guilds.add(interaction.guild.id)
                 voice_client.stop()
                 
-                # Smart skip: Always check queue first, then auto-play similar music
                 if not guild_queue.is_empty():
-                    # Songs in queue - play next from queue
                     next_song = guild_queue.next()
-                    await interaction.response.send_message(f"⏭️ Playing next from queue: **{next_song}**", ephemeral=True)
+                    embed = discord.Embed(
+                        title=f"{get_emoji('skip')} Playing Next from Queue",
+                        description=f"**{next_song[:50]}{'...' if len(next_song) > 50 else ''}**",
+                        color=EMBED_COLORS['playing']
+                    )
+                    embed.add_field(name="Queue Position", value=f"Next up", inline=True)
+                    embed.set_footer(text=f"Server: {interaction.guild.name}")
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     
-                    # Immediately play next song from queue
                     try:
                         if SPOTIFY_ENABLED and 'spotify.com/track/' in next_song:
                             await self.play_next_spotify_track(interaction, next_song)
@@ -284,7 +380,12 @@ class MusicDashboardView(discord.ui.View):
                             await self.play_next_youtube_search(interaction, next_song)
                     except Exception as play_error:
                         logger.error(f"Error playing next song: {play_error}")
-                        await interaction.followup.send("❌ Error playing next song", ephemeral=True)
+                        error_embed = discord.Embed(
+                            title=f"{get_emoji('error')} Playback Error",
+                            description="Failed to play next song from queue",
+                            color=EMBED_COLORS['error']
+                        )
+                        await interaction.followup.send(embed=error_embed, ephemeral=True)
                 else:
                     # Queue is empty - automatically find and play similar music
                     current_song = current_song_info.get(self.guild_id)
@@ -547,104 +648,120 @@ class MusicDashboardView(discord.ui.View):
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ Error occurred", ephemeral=True)
             
-    @discord.ui.button(label="📜 Queue", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=get_emoji('queue'), label="Queue", style=discord.ButtonStyle.secondary, row=1)
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
             
             if guild_queue.is_empty():
-                await interaction.response.send_message("❌ Queue is empty", ephemeral=True)
+                embed = discord.Embed(
+                    title=f"{get_emoji('queue')} Queue Status",
+                    description="Queue is currently empty",
+                    color=EMBED_COLORS['info']
+                )
+                embed.add_field(name="Tip", value="Use `/play` to add songs!", inline=False)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
             
-            embed = discord.Embed(title="🎵 Current Queue", color=0x00ff00)
+            embed = discord.Embed(
+                title=f"{get_emoji('queue')} Current Queue", 
+                color=EMBED_COLORS['queue']
+            )
             
-            queue_list = []
-            for i, song in enumerate(guild_queue.queue[:10]):
-                queue_list.append(f"{i + 1}. {song}")
+            queue_display = guild_queue.get_queue_display(10)
+            embed.description = queue_display
             
-            if len(guild_queue.queue) > 10:
-                queue_list.append(f"... and {len(guild_queue.queue) - 10} more songs")
-            
-            embed.description = "\n".join(queue_list) if queue_list else "Queue is empty"
-            embed.add_field(name="Total Songs", value=str(guild_queue.size()), inline=True)
+            embed.add_field(name="Total Songs", value=f"{guild_queue.size()} tracks", inline=True)
+            embed.add_field(name="Auto-Play", value=f"{get_emoji('autoplay')} {'ON' if guild_queue.is_auto_play else 'OFF'}", inline=True)
+            embed.add_field(name="Volume", value=f"{get_emoji('volume_up')} {guild_queue.get_volume_percentage()}%", inline=True)
+            embed.set_footer(text=f"Server: {interaction.guild.name}")
             
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Queue button error: {e}")
             if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+                embed = discord.Embed(
+                    title=f"{get_emoji('error')} Error Occurred",
+                    description="Failed to display queue",
+                    color=EMBED_COLORS['error']
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
         
-    @discord.ui.button(label="🔊+", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=get_emoji('volume_up'), label="Vol+", style=discord.ButtonStyle.secondary, row=1)
     async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
             old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
             
-            # Check if there's an existing volume message to edit
-            if interaction.guild.id in volume_messages:
-                try:
-                    await volume_messages[interaction.guild.id].edit(content=f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
-                    await interaction.response.send_message("Volume updated", ephemeral=True)
-                except:
-                    # If editing fails, send new message and store it
-                    await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
-                    volume_messages[interaction.guild.id] = await interaction.original_response()
-            else:
-                # Send new message and store it for future edits
-                await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
-                volume_messages[interaction.guild.id] = await interaction.original_response()
+            embed = discord.Embed(
+                title=f"{get_emoji('volume_up')} Volume Increased",
+                description=f"Volume set to **{guild_queue.get_volume_percentage()}%**",
+                color=EMBED_COLORS['success']
+            )
             
-            # Apply volume change without restarting the song
+            # Visual volume bar
+            volume_bar_length = 20
+            filled_bars = int((new_volume * volume_bar_length))
+            volume_bar = "█" * filled_bars + "░" * (volume_bar_length - filled_bars)
+            embed.add_field(name="Volume Level", value=f"`{volume_bar}`", inline=False)
+            embed.set_footer(text=f"Server: {interaction.guild.name}")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            # Apply volume change instantly
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.source and hasattr(voice_client.source, 'volume'):
-                # Apply volume instantly using PCMVolumeTransformer
                 voice_client.source.volume = new_volume
                 logger.info(f"Volume instantly changed to {guild_queue.get_volume_percentage()}%")
             
         except Exception as e:
             logger.error(f"Volume up error: {e}")
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Error occurred", ephemeral=True)
-            except:
-                pass
+            if not interaction.response.is_done():
+                embed = discord.Embed(
+                    title=f"{get_emoji('error')} Volume Error",
+                    description="Failed to increase volume",
+                    color=EMBED_COLORS['error']
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
     
-    @discord.ui.button(label="🔉-", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji=get_emoji('volume_down'), label="Vol-", style=discord.ButtonStyle.secondary, row=1)
     async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
             old_volume = guild_queue.volume
             new_volume = guild_queue.decrease_volume()
             
-            # Check if there's an existing volume message to edit
-            if interaction.guild.id in volume_messages:
-                try:
-                    await volume_messages[interaction.guild.id].edit(content=f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
-                    await interaction.response.send_message("Volume updated", ephemeral=True)
-                except:
-                    # If editing fails, send new message and store it
-                    await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
-                    volume_messages[interaction.guild.id] = await interaction.original_response()
-            else:
-                # Send new message and store it for future edits
-                await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
-                volume_messages[interaction.guild.id] = await interaction.original_response()
+            embed = discord.Embed(
+                title=f"{get_emoji('volume_down')} Volume Decreased",
+                description=f"Volume set to **{guild_queue.get_volume_percentage()}%**",
+                color=EMBED_COLORS['warning']
+            )
             
-            # Apply volume change without restarting the song
+            # Visual volume bar
+            volume_bar_length = 20
+            filled_bars = int((new_volume * volume_bar_length))
+            volume_bar = "█" * filled_bars + "░" * (volume_bar_length - filled_bars)
+            embed.add_field(name="Volume Level", value=f"`{volume_bar}`", inline=False)
+            embed.set_footer(text=f"Server: {interaction.guild.name}")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            # Apply volume change instantly
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.source and hasattr(voice_client.source, 'volume'):
-                # Apply volume instantly using PCMVolumeTransformer
                 voice_client.source.volume = new_volume
                 logger.info(f"Volume instantly changed to {guild_queue.get_volume_percentage()}%")
             
         except Exception as e:
             logger.error(f"Volume down error: {e}")
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Error occurred", ephemeral=True)
-            except:
-                pass
+            if not interaction.response.is_done():
+                embed = discord.Embed(
+                    title=f"{get_emoji('error')} Volume Error",
+                    description="Failed to decrease volume",
+                    color=EMBED_COLORS['error']
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
     
     async def restart_audio_with_volume(self, interaction, title, volume):
         """Restart current audio with new volume quickly"""
