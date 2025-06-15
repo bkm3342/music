@@ -92,6 +92,81 @@ current_song_info = {}
 guild_voice_clients = {}
 song_start_times = {}  # Track when songs started playing
 current_audio_urls = {}  # Track current audio URLs for volume changes
+played_songs_history = {}  # Track played songs to avoid repetition
+
+async def generate_smart_autoplay_query(current_song):
+    """Generate intelligent search queries for autoplay to avoid repeating songs"""
+    import random
+    
+    # Extract key words from current song title
+    title_lower = current_song.lower()
+    
+    # Define different search strategies based on song content
+    search_strategies = []
+    
+    # Strategy 1: Genre-based search
+    if any(genre in title_lower for genre in ['punjabi', 'hindi', 'bollywood', 'rap', 'pop', 'rock']):
+        if 'punjabi' in title_lower:
+            search_strategies.extend([
+                "new punjabi songs 2024",
+                "latest punjabi hits",
+                "punjabi music trending",
+                "sidhu moose wala songs",
+                "karan aujla new song"
+            ])
+        elif 'hindi' in title_lower or 'bollywood' in title_lower:
+            search_strategies.extend([
+                "latest bollywood songs 2024",
+                "new hindi songs",
+                "trending bollywood music",
+                "arijit singh songs",
+                "raghav chaitanya songs"
+            ])
+    
+    # Strategy 2: Mood-based search
+    if any(mood in title_lower for mood in ['sad', 'love', 'party', 'romantic', 'dance']):
+        if 'love' in title_lower or 'romantic' in title_lower:
+            search_strategies.extend([
+                "romantic songs 2024",
+                "love songs hindi",
+                "romantic bollywood songs"
+            ])
+        elif 'dance' in title_lower or 'party' in title_lower:
+            search_strategies.extend([
+                "dance songs 2024",
+                "party songs hindi",
+                "club music trending"
+            ])
+    
+    # Strategy 3: Artist-based search (extract potential artist names)
+    words = current_song.split()
+    potential_artists = []
+    for word in words:
+        if len(word) > 3 and word.isupper():
+            potential_artists.append(word)
+    
+    if potential_artists:
+        for artist in potential_artists[:2]:  # Use first 2 potential artists
+            search_strategies.append(f"{artist} new songs")
+            search_strategies.append(f"{artist} latest music")
+    
+    # Strategy 4: General trending searches
+    search_strategies.extend([
+        "trending songs 2024",
+        "viral songs india",
+        "latest music hits",
+        "new songs this week",
+        "popular songs 2024",
+        "top charts india",
+        "youtube trending music"
+    ])
+    
+    # Select a random strategy to ensure variety
+    if search_strategies:
+        return random.choice(search_strategies)
+    else:
+        # Fallback to generic search
+        return "trending songs 2024"
 
 class MusicQueue:
     def __init__(self):
@@ -593,9 +668,19 @@ async def wait_for_song_completion(interaction):
                 # Queue is empty, find similar song automatically
                 current_song = current_song_info.get(interaction.guild.id)
                 if current_song:
-                    # Generate a search query based on the previous song
-                    similar_query = f"{current_song} similar song"
-                    await interaction.followup.send(f"🎵 Auto-Playing Similar Song to: {current_song}")
+                    # Add current song to history to avoid repetition
+                    guild_id = interaction.guild.id
+                    if guild_id not in played_songs_history:
+                        played_songs_history[guild_id] = []
+                    
+                    # Keep only last 10 songs in history
+                    played_songs_history[guild_id].append(current_song.lower())
+                    if len(played_songs_history[guild_id]) > 10:
+                        played_songs_history[guild_id].pop(0)
+                    
+                    # Generate a more intelligent search query for different songs
+                    similar_query = await generate_smart_autoplay_query(current_song)
+                    await interaction.followup.send(f"🎵 Auto-Playing: Finding similar music...")
                     await start_playback(interaction, similar_query)
     except Exception as e:
         logger.error(f"Wait for song completion error: {e}")
