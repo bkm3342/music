@@ -6,6 +6,7 @@ import re
 import asyncio
 import os
 import logging
+import time
 from spotipy.oauth2 import SpotifyClientCredentials
 
 # Load opus for voice support
@@ -76,10 +77,11 @@ ytdl_format_options = {
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
-# Enhanced FFmpeg options for better audio quality with dynamic volume
-def get_ffmpeg_options(volume=0.5):
+# Enhanced FFmpeg options for better audio quality with dynamic volume and seeking
+def get_ffmpeg_options(volume=0.5, seek_time=0):
+    seek_option = f'-ss {seek_time}' if seek_time > 0 else ''
     return {
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M',
+        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M {seek_option}',
         'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 192k'
     }
 
@@ -87,6 +89,8 @@ def get_ffmpeg_options(volume=0.5):
 current_guild_queues = {}
 current_song_info = {}
 guild_voice_clients = {}
+song_start_times = {}  # Track when songs started playing
+current_audio_urls = {}  # Track current audio URLs for volume changes
 
 class MusicQueue:
     def __init__(self):
@@ -294,6 +298,9 @@ class MusicDashboardView(discord.ui.View):
                 
                 voice_client.play(source)
                 current_song_info[interaction.guild.id] = title
+                # Track when song started and cache audio URL
+                song_start_times[interaction.guild.id] = time.time()
+                current_audio_urls[interaction.guild.id] = audio_url
                 logger.info(f"Now playing: {title} in guild: {interaction.guild.name}")
         except Exception as e:
             logger.error(f"Error in start_audio_playback: {e}")
@@ -358,9 +365,14 @@ class MusicDashboardView(discord.ui.View):
             if voice_client and voice_client.is_playing():
                 current_song = current_song_info.get(interaction.guild.id)
                 if current_song:
-                    # Stop current audio and restart with new volume
+                    # Calculate current playback position
+                    import time
+                    start_time = song_start_times.get(interaction.guild.id, time.time())
+                    current_position = time.time() - start_time
+                    
+                    # Stop current audio and restart with new volume from current position
                     voice_client.stop()
-                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume))
+                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume, current_position))
             
         except Exception as e:
             logger.error(f"Volume up error: {e}")
@@ -384,9 +396,14 @@ class MusicDashboardView(discord.ui.View):
             if voice_client and voice_client.is_playing():
                 current_song = current_song_info.get(interaction.guild.id)
                 if current_song:
-                    # Stop current audio and restart with new volume
+                    # Calculate current playback position
+                    import time
+                    start_time = song_start_times.get(interaction.guild.id, time.time())
+                    current_position = time.time() - start_time
+                    
+                    # Stop current audio and restart with new volume from current position
                     voice_client.stop()
-                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume))
+                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume, current_position))
             
         except Exception as e:
             logger.error(f"Volume down error: {e}")
@@ -404,8 +421,8 @@ class MusicDashboardView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error scheduling audio restart: {e}")
     
-    async def _restart_audio_background(self, guild_id, title, volume):
-        """Background task to restart audio with new volume"""
+    async def _restart_audio_background(self, guild_id, title, volume, seek_time=0):
+        """Background task to restart audio with new volume from specific time"""
         try:
             await asyncio.sleep(0.05)  # Minimal delay to ensure stop completed
             
@@ -414,25 +431,31 @@ class MusicDashboardView(discord.ui.View):
             if guild and guild.voice_client:
                 voice_client = guild.voice_client
                 
-                # Search for the current song again to get fresh URL
-                search_query = f"{title} song"
-                info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+                # Use cached audio URL if available, otherwise search again
+                audio_url = current_audio_urls.get(guild_id)
+                if not audio_url:
+                    search_query = f"{title} song"
+                    info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+                    
+                    if info and info.get('entries'):
+                        video_info = info['entries'][0]
+                        audio_url = self.get_best_audio_url(video_info)
+                        current_audio_urls[guild_id] = audio_url
                 
-                if info and info.get('entries'):
-                    video_info = info['entries'][0]
-                    audio_url = self.get_best_audio_url(video_info)
-                    if audio_url:
-                        # Create new audio source with updated volume
-                        source = discord.FFmpegPCMAudio(
-                            audio_url,
-                            executable=FFMPEG_PATH,
-                            **get_ffmpeg_options(volume)
-                        )
-                        
-                        # Start playing with new volume
-                        voice_client.play(source)
-                        current_song_info[guild_id] = title
-                        logger.info(f"Volume instantly changed to {int(volume*100)}% for: {title}")
+                if audio_url:
+                    # Create new audio source with updated volume and seek time
+                    source = discord.FFmpegPCMAudio(
+                        audio_url,
+                        executable=FFMPEG_PATH,
+                        **get_ffmpeg_options(volume, seek_time)
+                    )
+                    
+                    # Start playing with new volume from specified time
+                    voice_client.play(source)
+                    current_song_info[guild_id] = title
+                    # Update start time to account for the seek
+                    song_start_times[guild_id] = time.time() - seek_time
+                    logger.info(f"Volume instantly changed to {int(volume*100)}% for: {title} (resumed from {int(seek_time)}s)")
         except Exception as e:
             logger.error(f"Error in background audio restart: {e}")
         
