@@ -8,6 +8,21 @@ import os
 import logging
 from spotipy.oauth2 import SpotifyClientCredentials
 
+# Load opus for voice support
+try:
+    discord.opus.load_opus('/nix/store/2m0ngng1iy80h65052chw7mn18qbgq0w-libopus-1.5.2/lib/libopus.so.0')
+except:
+    try:
+        discord.opus.load_opus('/nix/store/2m0ngng1iy80h65052chw7mn18qbgq0w-libopus-1.5.2/lib/libopus.so')
+    except:
+        try:
+            discord.opus.load_opus('libopus.so.0')
+        except:
+            try:
+                discord.opus.load_opus('libopus.so')
+            except:
+                pass
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -221,7 +236,7 @@ async def play_youtube(interaction, url_or_query):
             audio_url,
             executable=FFMPEG_PATH,
             before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-            options="-vn -loglevel error"
+            options="-vn"
         )
 
         voice_client = interaction.guild.voice_client
