@@ -366,13 +366,17 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             
             if voice_client and audio_url:
-                source = discord.FFmpegPCMAudio(
-                    audio_url,
-                    executable=FFMPEG_PATH,
-                    **get_ffmpeg_options(guild_queue.volume)
+                # Use PCMVolumeTransformer for real-time volume control
+                source = discord.PCMVolumeTransformer(
+                    discord.FFmpegPCMAudio(
+                        audio_url,
+                        executable=FFMPEG_PATH,
+                        **get_ffmpeg_options()
+                    ),
+                    volume=guild_queue.volume
                 )
                 
-                voice_client.play(source)
+                voice_client.play(source, after=lambda e: asyncio.create_task(self.on_song_finished(interaction.guild.id)) if e is None else None)
                 current_song_info[interaction.guild.id] = title
                 # Track when song started and cache audio URL
                 song_start_times[interaction.guild.id] = time.time()
@@ -380,6 +384,129 @@ class MusicDashboardView(discord.ui.View):
                 logger.info(f"Now playing: {title} in guild: {interaction.guild.name}")
         except Exception as e:
             logger.error(f"Error in start_audio_playback: {e}")
+
+    async def on_song_finished(self, guild_id):
+        """Handle when a song finishes playing"""
+        try:
+            guild = bot.get_guild(guild_id)
+            if not guild:
+                return
+                
+            guild_queue = get_guild_queue(guild_id)
+            voice_client = guild.voice_client
+            
+            if voice_client and guild_queue.is_auto_play:
+                if not guild_queue.is_empty():
+                    # Play next song from queue
+                    next_song = guild_queue.next()
+                    current_song_info[guild_id] = next_song
+                    logger.info(f"Auto-playing next from queue: {next_song}")
+                    
+                    # Play next song based on type
+                    if SPOTIFY_ENABLED and 'spotify.com/track/' in next_song:
+                        await self.play_next_spotify_track_auto(guild, next_song)
+                    elif SPOTIFY_ENABLED and 'spotify.com/playlist/' in next_song:
+                        await self.play_next_spotify_playlist_auto(guild, next_song)  
+                    elif 'youtube.com' in next_song or 'youtu.be' in next_song:
+                        await self.play_next_youtube_auto(guild, next_song)
+                    else:
+                        await self.play_next_youtube_search_auto(guild, next_song)
+                else:
+                    # Generate autoplay suggestion
+                    current_song = current_song_info.get(guild_id)
+                    if current_song:
+                        similar_query = await generate_smart_autoplay_query(current_song)
+                        logger.info(f"Auto-playing similar: {similar_query}")
+                        await self.play_next_youtube_search_auto(guild, similar_query)
+        except Exception as e:
+            logger.error(f"Error in on_song_finished: {e}")
+
+    async def play_next_youtube_search_auto(self, guild, query):
+        """Auto-play next song from YouTube search"""
+        try:
+            search_query = f"{query} song" if not any(keyword in query.lower() for keyword in ['song', 'music', 'audio']) else query
+            info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+            
+            if info and info.get('entries'):
+                video_info = info['entries'][0]
+                audio_url = self.get_best_audio_url(video_info)
+                title = video_info.get('title', 'Unknown')
+                
+                if audio_url:
+                    guild_queue = get_guild_queue(guild.id)
+                    source = discord.PCMVolumeTransformer(
+                        discord.FFmpegPCMAudio(
+                            audio_url,
+                            executable=FFMPEG_PATH,
+                            **get_ffmpeg_options()
+                        ),
+                        volume=guild_queue.volume
+                    )
+                    
+                    voice_client = guild.voice_client
+                    if voice_client:
+                        voice_client.play(source, after=lambda e: asyncio.create_task(self.on_song_finished(guild.id)) if e is None else None)
+                        current_song_info[guild.id] = title
+                        song_start_times[guild.id] = time.time()
+                        current_audio_urls[guild.id] = audio_url
+        except Exception as e:
+            logger.error(f"Error in play_next_youtube_search_auto: {e}")
+
+    async def play_next_youtube_auto(self, guild, url):
+        """Auto-play next song from YouTube URL"""
+        try:
+            info = ytdl.extract_info(url, download=False)
+            if 'entries' in info and info['entries']:
+                info = info['entries'][0]
+            
+            if info:
+                audio_url = self.get_best_audio_url(info)
+                title = info.get('title', 'Unknown')
+                
+                if audio_url:
+                    guild_queue = get_guild_queue(guild.id)
+                    source = discord.PCMVolumeTransformer(
+                        discord.FFmpegPCMAudio(
+                            audio_url,
+                            executable=FFMPEG_PATH,
+                            **get_ffmpeg_options()
+                        ),
+                        volume=guild_queue.volume
+                    )
+                    
+                    voice_client = guild.voice_client
+                    if voice_client:
+                        voice_client.play(source, after=lambda e: asyncio.create_task(self.on_song_finished(guild.id)) if e is None else None)
+                        current_song_info[guild.id] = title
+                        song_start_times[guild.id] = time.time()
+                        current_audio_urls[guild.id] = audio_url
+        except Exception as e:
+            logger.error(f"Error in play_next_youtube_auto: {e}")
+
+    async def play_next_spotify_track_auto(self, guild, url):
+        """Auto-play next Spotify track"""
+        try:
+            track_id = extract_spotify_track_id(url)
+            if track_id and SPOTIFY_ENABLED:
+                track = sp.track(track_id)
+                query = f"{track['name']} {track['artists'][0]['name']}"
+                await self.play_next_youtube_search_auto(guild, query)
+        except Exception as e:
+            logger.error(f"Error in play_next_spotify_track_auto: {e}")
+
+    async def play_next_spotify_playlist_auto(self, guild, url):
+        """Auto-play first track from Spotify playlist"""
+        try:
+            playlist_id = extract_spotify_playlist_id(url)
+            if playlist_id and SPOTIFY_ENABLED:
+                playlist = sp.playlist(playlist_id)
+                tracks = playlist['tracks']['items']
+                if tracks and tracks[0]['track']:
+                    track = tracks[0]['track']
+                    query = f"{track['name']} {track['artists'][0]['name']}"
+                    await self.play_next_youtube_search_auto(guild, query)
+        except Exception as e:
+            logger.error(f"Error in play_next_spotify_playlist_auto: {e}")
             
     @discord.ui.button(label="🔄 Auto-Play: ON", style=discord.ButtonStyle.success, row=1)
     async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -431,24 +558,18 @@ class MusicDashboardView(discord.ui.View):
     async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
+            old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
             
             # Respond immediately to avoid timeout
-            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}% (Applied instantly!)", ephemeral=True)
+            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
             
-            # Apply volume immediately to current playing song
+            # Apply volume change without restarting the song
             voice_client = interaction.guild.voice_client
-            if voice_client and voice_client.is_playing():
-                current_song = current_song_info.get(interaction.guild.id)
-                if current_song:
-                    # Calculate current playback position
-                    import time
-                    start_time = song_start_times.get(interaction.guild.id, time.time())
-                    current_position = time.time() - start_time
-                    
-                    # Stop current audio and restart with new volume from current position
-                    voice_client.stop()
-                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume, current_position))
+            if voice_client and voice_client.source and hasattr(voice_client.source, 'volume'):
+                # Apply volume instantly using PCMVolumeTransformer
+                voice_client.source.volume = new_volume
+                logger.info(f"Volume instantly changed to {guild_queue.get_volume_percentage()}%")
             
         except Exception as e:
             logger.error(f"Volume up error: {e}")
@@ -462,24 +583,18 @@ class MusicDashboardView(discord.ui.View):
     async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
+            old_volume = guild_queue.volume
             new_volume = guild_queue.decrease_volume()
             
             # Respond immediately to avoid timeout
-            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}% (Applied instantly!)", ephemeral=True)
+            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
             
-            # Apply volume immediately to current playing song
+            # Apply volume change without restarting the song
             voice_client = interaction.guild.voice_client
-            if voice_client and voice_client.is_playing():
-                current_song = current_song_info.get(interaction.guild.id)
-                if current_song:
-                    # Calculate current playback position
-                    import time
-                    start_time = song_start_times.get(interaction.guild.id, time.time())
-                    current_position = time.time() - start_time
-                    
-                    # Stop current audio and restart with new volume from current position
-                    voice_client.stop()
-                    asyncio.create_task(self._restart_audio_background(interaction.guild.id, current_song, guild_queue.volume, current_position))
+            if voice_client and voice_client.source and hasattr(voice_client.source, 'volume'):
+                # Apply volume instantly using PCMVolumeTransformer
+                voice_client.source.volume = new_volume
+                logger.info(f"Volume instantly changed to {guild_queue.get_volume_percentage()}%")
             
         except Exception as e:
             logger.error(f"Volume down error: {e}")
