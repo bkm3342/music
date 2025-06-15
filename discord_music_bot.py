@@ -168,8 +168,13 @@ async def play_youtube(interaction, url_or_query):
         if not ('youtube.com' in url_or_query or 'youtu.be' in url_or_query):
             url_or_query = f"ytsearch:{url_or_query}"
             
+        logger.info(f"Extracting info for: {url_or_query}")
         info = ytdl.extract_info(url_or_query, download=False)
         
+        if not info:
+            await interaction.followup.send("❌ Could not extract video information.")
+            return
+            
         if 'entries' in info:
             # Search result
             if not info['entries']:
@@ -177,10 +182,33 @@ async def play_youtube(interaction, url_or_query):
                 return
             info = info['entries'][0]
         
-        stream_url = info['url']
+        if not info:
+            await interaction.followup.send("❌ Could not find video information.")
+            return
+            
+        # Get the best audio format
+        formats = info.get('formats', [])
+        audio_url = None
+        
+        # Try to find best audio format
+        for fmt in formats:
+            if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
+                audio_url = fmt.get('url')
+                break
+                
+        # Fallback to the main URL
+        if not audio_url:
+            audio_url = info.get('url')
+            
+        if not audio_url:
+            await interaction.followup.send("❌ Could not find audio stream.")
+            return
+        
         title = info.get('title', 'Unknown Title')
         webpage_url = info.get('webpage_url', '')
         duration = info.get('duration', 0)
+        
+        logger.info(f"Playing: {title} from {audio_url}")
         
         # Format duration
         if duration:
@@ -190,14 +218,15 @@ async def play_youtube(interaction, url_or_query):
             duration_str = "Unknown"
 
         source = discord.FFmpegPCMAudio(
-            stream_url,
+            audio_url,
             executable=FFMPEG_PATH,
             before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-            options="-vn"
+            options="-vn -loglevel error"
         )
 
         voice_client = interaction.guild.voice_client
-        voice_client.stop()
+        if voice_client.is_playing():
+            voice_client.stop()
         voice_client.play(source)
         
         embed = discord.Embed(
@@ -210,8 +239,10 @@ async def play_youtube(interaction, url_or_query):
         await interaction.followup.send(embed=embed)
         
     except Exception as e:
-        logger.error(f"YouTube playback error: {e}")
-        await interaction.followup.send(f"❌ YouTube error: {e}")
+        logger.error(f"YouTube playback error: {str(e)}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        await interaction.followup.send(f"❌ YouTube error: {str(e)}")
 
 async def play_spotify_track(interaction, url):
     """Play a Spotify track by searching for it on YouTube"""

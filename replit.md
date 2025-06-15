@@ -91,7 +91,10 @@ The bot follows a single-file architecture pattern with clear separation of conc
 
 ```
 Changelog:
-- June 15, 2025. Initial setup
+- June 15, 2025: Initial setup
+- June 15, 2025: Fixed YouTube playback errors with improved audio format detection
+- June 15, 2025: Added PyNaCl for full voice support 
+- June 15, 2025: Enhanced error handling and logging for better troubleshooting
 ```
 
 ## User Preferences
