@@ -3,6 +3,7 @@ services:
     name: discord-music-bot
     env: python
     plan: free
+    pythonVersion: 3.11.9
     buildCommand: pip install discord.py==2.3.2 yt-dlp==2023.12.30 spotipy==2.24.0 opuslib==3.0.1 PyNaCl==1.5.0
     startCommand: python discord_music_bot.py
     envVars:

@@ -62,18 +62,22 @@ SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 
 ### Common Issues:
 
-1. **FFmpeg not found**
-   - Solution: Dockerfile includes FFmpeg installation
+1. **"ModuleNotFoundError: No module named 'audioop'"**
+   - Cause: Python 3.13+ removed the audioop module required by discord.py
+   - Solution: Use Python 3.11.9 (already specified in render.yaml and .python-version)
 
-2. **Opus library errors**
+2. **FFmpeg not found**
+   - Solution: Render Python environment includes FFmpeg automatically
+
+3. **Opus library errors**
    - Solution: PyNaCl and libopus are included in dependencies
 
-3. **Bot doesn't respond**
+4. **Bot doesn't respond**
    - Check environment variables are set correctly
    - Verify Discord bot token is valid
    - Check bot permissions in Discord server
 
-4. **Memory issues**
+5. **Memory issues**
    - Upgrade from Free tier if needed
    - Monitor resource usage in Render dashboard
 

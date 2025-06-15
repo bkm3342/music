@@ -1,0 +1,44 @@
+list, charset_normalizer, certifi, attrs, aiohappyeyeballs, yarl, requests, cffi, aiosignal, yt-dlp, spotipy, PyNaCl, aiohttp, discord.py
+Successfully installed PyNaCl-1.5.0 aiohappyeyeballs-2.6.1 aiohttp-3.12.13 aiosignal-1.3.2 attrs-25.3.0 brotli-1.1.0 certifi-2025.6.15 cffi-1.17.1 charset_normalizer-3.4.2 discord.py-2.3.2 frozenlist-1.7.0 idna-3.10 multidict-6.4.4 mutagen-1.47.0 opuslib-3.0.1 propcache-0.3.2 pycparser-2.22 pycryptodomex-3.23.0 redis-6.2.0 requests-2.32.4 spotipy-2.24.0 urllib3-2.4.0 websockets-15.0.1 yarl-1.20.1 yt-dlp-2023.12.30
+==> Uploading build...
+==> Uploaded in 5.6s. Compression took 1.6s
+==> Build successful 🎉
+==> Deploying...
+==> No open ports detected, continuing to scan...
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Running 'python discord_music_bot.py'
+Traceback (most recent call last):
+  File "/opt/render/project/src/discord_music_bot.py", line 1, in <module>
+    import discord
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/__init__.py", line 23, in <module>
+    from .client import *
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/client.py", line 51, in <module>
+    from .user import User, ClientUser
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/user.py", line 29, in <module>
+    import discord.abc
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/abc.py", line 59, in <module>
+    from .voice_client import VoiceClient, VoiceProtocol
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/voice_client.py", line 53, in <module>
+    from .player import AudioPlayer, AudioSource
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/player.py", line 28, in <module>
+    import audioop
+ModuleNotFoundError: No module named 'audioop'
+==> Exited with status 1
+==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+==> Running 'python discord_music_bot.py'
+Traceback (most recent call last):
+  File "/opt/render/project/src/discord_music_bot.py", line 1, in <module>
+    import discord
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/__init__.py", line 23, in <module>
+    from .client import *
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/client.py", line 51, in <module>
+    from .user import User, ClientUser
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/user.py", line 29, in <module>
+    import discord.abc
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/abc.py", line 59, in <module>
+    from .voice_client import VoiceClient, VoiceProtocol
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/voice_client.py", line 53, in <module>
+    from .player import AudioPlayer, AudioSource
+  File "/opt/render/project/src/.venv/lib/python3.13/site-packages/discord/player.py", line 28, in <module>
+    import audioop
+ModuleNotFoundError: No module named 'audioop'
