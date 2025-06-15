@@ -140,6 +140,7 @@ Changelog:
 - June 15, 2025: Enhanced music dashboard with 3-row button layout and real-time audio effect controls
 - June 15, 2025: Integrated seamless effect switching without song interruption using background processing
 - June 15, 2025: Added persistent audio effect settings per server with visual feedback indicators
+- June 15, 2025: Fixed critical auto-play bug when using audio effects - effects now apply to current song without triggering next song
 ```
 
 ## User Preferences
