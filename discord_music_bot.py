@@ -263,12 +263,13 @@ class MusicDashboardView(discord.ui.View):
             if voice_client and voice_client.is_playing():
                 voice_client.stop()
                 
-                # Always check for next song, regardless of auto-play setting
+                # Smart skip: Always check queue first, then auto-play similar music
                 if not guild_queue.is_empty():
+                    # Songs in queue - play next from queue
                     next_song = guild_queue.next()
-                    await interaction.response.send_message(f"⏭️ Playing next: {next_song}", ephemeral=True)
+                    await interaction.response.send_message(f"⏭️ Playing next from queue: **{next_song}**", ephemeral=True)
                     
-                    # Immediately play next song
+                    # Immediately play next song from queue
                     try:
                         if SPOTIFY_ENABLED and 'spotify.com/track/' in next_song:
                             await self.play_next_spotify_track(interaction, next_song)
@@ -282,22 +283,19 @@ class MusicDashboardView(discord.ui.View):
                         logger.error(f"Error playing next song: {play_error}")
                         await interaction.followup.send("❌ Error playing next song", ephemeral=True)
                 else:
-                    # No songs in queue - check if auto-play is enabled
-                    if guild_queue.is_auto_play:
-                        await interaction.response.send_message("⏭️ Skipped - Auto-playing similar music", ephemeral=True)
-                        # Generate autoplay suggestion
-                        current_song = current_song_info.get(self.guild_id)
-                        if current_song:
-                            similar_query = await generate_smart_autoplay_query(current_song)
-                            try:
-                                await self.play_next_youtube_search(interaction, similar_query)
-                            except Exception as play_error:
-                                logger.error(f"Error in autoplay: {play_error}")
-                                await interaction.followup.send("❌ No more songs to play", ephemeral=True)
-                        else:
-                            await interaction.followup.send("❌ No more songs to play", ephemeral=True)
+                    # Queue is empty - automatically find and play similar music
+                    current_song = current_song_info.get(self.guild_id)
+                    if current_song:
+                        await interaction.response.send_message("⏭️ Queue empty - Finding similar music automatically...", ephemeral=True)
+                        similar_query = await generate_smart_autoplay_query(current_song)
+                        try:
+                            await self.play_next_youtube_search(interaction, similar_query)
+                            await interaction.followup.send(f"🎵 Now playing similar: **{similar_query}**", ephemeral=True)
+                        except Exception as play_error:
+                            logger.error(f"Error in autoplay: {play_error}")
+                            await interaction.followup.send("❌ Could not find similar music", ephemeral=True)
                     else:
-                        await interaction.response.send_message("⏭️ Skipped - Queue is empty. Enable auto-play for continuous music", ephemeral=True)
+                        await interaction.response.send_message("⏭️ Skipped - No previous song to find similar music", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
         except Exception as e:
