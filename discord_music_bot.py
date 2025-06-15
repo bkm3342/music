@@ -93,6 +93,8 @@ guild_voice_clients = {}
 song_start_times = {}  # Track when songs started playing
 current_audio_urls = {}  # Track current audio URLs for volume changes
 played_songs_history = {}  # Track played songs to avoid repetition
+volume_messages = {}  # Track volume messages for editing
+paused_guilds = set()  # Track paused guilds to prevent auto-play
 
 async def generate_smart_autoplay_query(current_song):
     """Generate intelligent search queries for autoplay to avoid repeating songs"""
@@ -228,6 +230,7 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_playing():
                 voice_client.pause()
+                paused_guilds.add(interaction.guild.id)  # Track paused state
                 await interaction.response.send_message("⏸️ Music paused")
             else:
                 await interaction.response.send_message("❌ Nothing is playing")
@@ -242,6 +245,7 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_paused():
                 voice_client.resume()
+                paused_guilds.discard(interaction.guild.id)  # Remove from paused state
                 await interaction.response.send_message("▶️ Music resumed")
             else:
                 await interaction.response.send_message("❌ Nothing is paused")
@@ -576,8 +580,19 @@ class MusicDashboardView(discord.ui.View):
             old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
             
-            # Respond with live update for all users
-            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
+            # Check if there's an existing volume message to edit
+            if interaction.guild.id in volume_messages:
+                try:
+                    await volume_messages[interaction.guild.id].edit(content=f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
+                    await interaction.response.send_message("Volume updated", ephemeral=True)
+                except:
+                    # If editing fails, send new message and store it
+                    await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
+                    volume_messages[interaction.guild.id] = await interaction.original_response()
+            else:
+                # Send new message and store it for future edits
+                await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
+                volume_messages[interaction.guild.id] = await interaction.original_response()
             
             # Apply volume change without restarting the song
             voice_client = interaction.guild.voice_client
@@ -601,8 +616,19 @@ class MusicDashboardView(discord.ui.View):
             old_volume = guild_queue.volume
             new_volume = guild_queue.decrease_volume()
             
-            # Respond with live update for all users
-            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
+            # Check if there's an existing volume message to edit
+            if interaction.guild.id in volume_messages:
+                try:
+                    await volume_messages[interaction.guild.id].edit(content=f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
+                    await interaction.response.send_message("Volume updated", ephemeral=True)
+                except:
+                    # If editing fails, send new message and store it
+                    await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
+                    volume_messages[interaction.guild.id] = await interaction.original_response()
+            else:
+                # Send new message and store it for future edits
+                await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
+                volume_messages[interaction.guild.id] = await interaction.original_response()
             
             # Apply volume change without restarting the song
             voice_client = interaction.guild.voice_client
@@ -1437,6 +1463,25 @@ async def nowplaying(interaction: discord.Interaction):
     except Exception as e:
         logger.error(f"Now playing error in guild {interaction.guild.name}: {e}")
         await interaction.response.send_message("❌ Now playing error occurred", ephemeral=True)
+
+@bot.tree.command(name='ping', description="Check bot's latency and status")
+async def ping(interaction: discord.Interaction):
+    try:
+        latency = round(bot.latency * 1000)
+        
+        embed = discord.Embed(
+            title="🏓 Bot Status",
+            color=0x00ff00
+        )
+        embed.add_field(name="Latency", value=f"{latency}ms", inline=True)
+        embed.add_field(name="Status", value="🟢 Online", inline=True)
+        embed.add_field(name="Servers", value=str(len(bot.guilds)), inline=True)
+        embed.add_field(name="Voice Connections", value=str(len([g for g in bot.guilds if g.voice_client])), inline=True)
+        
+        await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        logger.error(f"Ping error: {e}")
+        await interaction.response.send_message("❌ Ping error occurred", ephemeral=True)
 
 @bot.event
 async def on_command_error(ctx, error):
