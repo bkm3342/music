@@ -95,6 +95,7 @@ current_audio_urls = {}  # Track current audio URLs for volume changes
 played_songs_history = {}  # Track played songs to avoid repetition
 volume_messages = {}  # Track volume messages for editing
 paused_guilds = set()  # Track paused guilds to prevent auto-play
+manually_skipped_guilds = set()  # Track guilds where skip button was used
 
 async def generate_smart_autoplay_query(current_song):
     """Generate intelligent search queries for autoplay to avoid repeating songs"""
@@ -261,6 +262,8 @@ class MusicDashboardView(discord.ui.View):
             guild_queue = get_guild_queue(self.guild_id)
             
             if voice_client and voice_client.is_playing():
+                # Mark this guild as manually skipped to prevent auto-progression interference
+                manually_skipped_guilds.add(interaction.guild.id)
                 voice_client.stop()
                 
                 # Smart skip: Always check queue first, then auto-play similar music
@@ -811,8 +814,10 @@ async def wait_for_song_completion(interaction):
         while interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
             await asyncio.sleep(2)
         
-        # Check if guild is paused - don't auto-play if paused
-        if interaction.guild.id in paused_guilds:
+        # Check if guild is paused or manually skipped - don't auto-play
+        if interaction.guild.id in paused_guilds or interaction.guild.id in manually_skipped_guilds:
+            # Remove from manually skipped set after checking
+            manually_skipped_guilds.discard(interaction.guild.id)
             return
         
         guild_queue = get_guild_queue(interaction.guild.id)
@@ -1073,6 +1078,7 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
             voice_client.stop()
         def after_playing(error):
             if error is None and interaction.guild.id not in paused_guilds:
+                # Only trigger auto-progression if not manually skipped
                 asyncio.run_coroutine_threadsafe(wait_for_song_completion(interaction), bot.loop)
         
         voice_client.play(source, after=after_playing)
