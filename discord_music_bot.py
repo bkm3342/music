@@ -342,7 +342,7 @@ class MusicQueue:
         self.is_auto_play = True
         self.loop_current = False
         self.loop_queue = False
-        self.volume = 0.5  # Default volume (50%)
+        self.volume = 1.0  # Default volume (100%)
         self.max_volume = 1.0
         self.min_volume = 0.1
         self.volume_step = 0.1
@@ -821,7 +821,20 @@ class MusicDashboardView(discord.ui.View):
             embed.add_field(name="Volume Level", value=f"`{volume_bar}`", inline=False)
             embed.set_footer(text=f"Server: {interaction.guild.name}")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # Check if there's an existing volume message to update
+            if self.guild_id in volume_messages:
+                try:
+                    # Update existing message instead of creating new one
+                    await volume_messages[self.guild_id].edit(embed=embed)
+                    await interaction.response.defer()
+                except:
+                    # If edit fails, send new message
+                    message = await interaction.response.send_message(embed=embed, ephemeral=False)
+                    volume_messages[self.guild_id] = await interaction.original_response()
+            else:
+                # Send new message visible to everyone
+                message = await interaction.response.send_message(embed=embed, ephemeral=False)
+                volume_messages[self.guild_id] = await interaction.original_response()
             
             # Apply volume change instantly
             voice_client = interaction.guild.voice_client
@@ -859,7 +872,20 @@ class MusicDashboardView(discord.ui.View):
             embed.add_field(name="Volume Level", value=f"`{volume_bar}`", inline=False)
             embed.set_footer(text=f"Server: {interaction.guild.name}")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # Check if there's an existing volume message to update
+            if self.guild_id in volume_messages:
+                try:
+                    # Update existing message instead of creating new one
+                    await volume_messages[self.guild_id].edit(embed=embed)
+                    await interaction.response.defer()
+                except:
+                    # If edit fails, send new message
+                    message = await interaction.response.send_message(embed=embed, ephemeral=False)
+                    volume_messages[self.guild_id] = await interaction.original_response()
+            else:
+                # Send new message visible to everyone
+                message = await interaction.response.send_message(embed=embed, ephemeral=False)
+                volume_messages[self.guild_id] = await interaction.original_response()
             
             # Apply volume change instantly
             voice_client = interaction.guild.voice_client
