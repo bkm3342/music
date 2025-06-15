@@ -118,8 +118,8 @@ async def on_ready():
     logger.info(f'✅ Logged in as {bot.user.name}')
     logger.info(f'Bot is ready! Spotify enabled: {SPOTIFY_ENABLED}')
 
-@bot.tree.command(name='play', description="Play a song from YouTube or Spotify")
-async def play(interaction: discord.Interaction, url: str):
+@bot.tree.command(name='play', description="Play music by song name, YouTube URL, or Spotify URL")
+async def play(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     
     # Check if user is in voice channel
@@ -140,23 +140,23 @@ async def play(interaction: discord.Interaction, url: str):
     
     # If something is already playing, add to queue
     if interaction.guild.voice_client.is_playing():
-        guild_queue.add(url)
-        await interaction.followup.send(f"🔥 Added to queue: {url} (Position: {guild_queue.size()})")
+        guild_queue.add(query)
+        await interaction.followup.send(f"🔥 Added to queue: {query} (Position: {guild_queue.size()})")
     else:
-        await start_playback(interaction, url)
+        await start_playback(interaction, query)
 
-async def start_playback(interaction, url):
+async def start_playback(interaction, query):
     """Start playing a song and handle queue progression"""
     try:
-        if SPOTIFY_ENABLED and 'spotify.com/track/' in url:
-            await play_spotify_track(interaction, url)
-        elif SPOTIFY_ENABLED and 'spotify.com/playlist/' in url:
-            await play_spotify_playlist(interaction, url)
-        elif 'youtube.com' in url or 'youtu.be' in url or not ('http' in url):
-            await play_youtube(interaction, url)
+        if SPOTIFY_ENABLED and 'spotify.com/track/' in query:
+            await play_spotify_track(interaction, query)
+        elif SPOTIFY_ENABLED and 'spotify.com/playlist/' in query:
+            await play_spotify_playlist(interaction, query)
+        elif 'youtube.com' in query or 'youtu.be' in query:
+            await play_youtube(interaction, query)
         else:
-            await interaction.followup.send("❌ Invalid URL. Use a YouTube or Spotify link, or provide a search term.")
-            return
+            # If it's not a URL, treat it as a song name search
+            await play_youtube_search(interaction, query)
             
         # Wait for current song to finish, then play next in queue
         await wait_for_song_completion(interaction)
@@ -329,24 +329,59 @@ async def play_spotify_playlist(interaction, url):
 async def play_youtube_search(interaction, query, spotify_link=None, track_name=None, artist_name=None):
     """Search and play from YouTube"""
     try:
-        info = ytdl.extract_info(f"ytsearch:{query}", download=False)
+        # Add "song" to the search if it doesn't contain common music keywords
+        search_query = query
+        music_keywords = ['song', 'music', 'audio', 'track', 'lyrics', 'official']
+        if not any(keyword in query.lower() for keyword in music_keywords):
+            search_query = f"{query} song"
+            
+        logger.info(f"Searching YouTube for: {search_query}")
+        info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
         if not info.get('entries'):
             await interaction.followup.send("❌ No results found on YouTube.")
             return
 
         video_info = info['entries'][0]
-        stream_url = video_info['url']
+        
+        # Get the best audio format
+        formats = video_info.get('formats', [])
+        audio_url = None
+        
+        # Try to find best audio format
+        for fmt in formats:
+            if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
+                audio_url = fmt.get('url')
+                break
+                
+        # Fallback to the main URL
+        if not audio_url:
+            audio_url = video_info.get('url')
+            
+        if not audio_url:
+            await interaction.followup.send("❌ Could not find audio stream.")
+            return
+            
         title = video_info.get('title', 'Unknown Title')
+        webpage_url = video_info.get('webpage_url', '')
+        duration = video_info.get('duration', 0)
+        
+        # Format duration
+        if duration:
+            minutes, seconds = divmod(duration, 60)
+            duration_str = f"{minutes}:{seconds:02d}"
+        else:
+            duration_str = "Unknown"
 
         source = discord.FFmpegPCMAudio(
-            stream_url,
+            audio_url,
             executable=FFMPEG_PATH,
             before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
             options="-vn"
         )
 
         voice_client = interaction.guild.voice_client
-        voice_client.stop()
+        if voice_client.is_playing():
+            voice_client.stop()
         voice_client.play(source)
         
         if spotify_link and track_name and artist_name:
@@ -356,13 +391,23 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
                 color=0x1db954
             )
             embed.add_field(name="Spotify Link", value=f"[Open in Spotify]({spotify_link})", inline=False)
-            embed.add_field(name="Playing from YouTube", value=title, inline=False)
+            embed.add_field(name="Playing from YouTube", value=f"[{title}]({webpage_url})", inline=False)
+            embed.add_field(name="Duration", value=duration_str, inline=True)
             await interaction.followup.send(embed=embed)
         else:
-            await interaction.followup.send(f"🎵 Now Playing: {title}")
+            embed = discord.Embed(
+                title="🎵 Now Playing",
+                description=f"[{title}]({webpage_url})",
+                color=0x00ff00
+            )
+            embed.add_field(name="Duration", value=duration_str, inline=True)
+            embed.add_field(name="Searched for", value=f"`{query}`", inline=True)
+            await interaction.followup.send(embed=embed)
 
     except Exception as e:
         logger.error(f"YouTube search error: {e}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         await interaction.followup.send(f"❌ YouTube search error: {e}")
 
 def extract_spotify_track_id(url):
