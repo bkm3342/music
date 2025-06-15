@@ -146,6 +146,9 @@ Changelog:
 - June 15, 2025: Enhanced bass boost effect with stronger low-frequency amplification
 - June 15, 2025: Fixed audio effects not applying to current song - all playback functions now properly use server-specific effects
 - June 15, 2025: Improved audio streaming stability with better buffering and reduced latency
+- June 15, 2025: Created complete Render deployment configuration with render.yaml, Dockerfile, and step-by-step deployment guide
+- June 15, 2025: Fixed Render deployment issues by switching from Docker to Python environment configuration
+- June 15, 2025: Updated bot code to use environment variables for secure token management in production deployment
 ```
 
 ## User Preferences

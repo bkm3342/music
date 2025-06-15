@@ -22,12 +22,12 @@ Make sure your project has these files:
 
 1. Click "New +" → "Web Service"
 2. Connect your GitHub repository
-3. Choose "Docker" as the environment
+3. Choose "Python" as the environment
 4. Set these configurations:
    - **Name**: `discord-music-bot`
-   - **Environment**: `Docker`
-   - **Build Command**: Leave empty (Docker handles this)
-   - **Start Command**: Leave empty (Docker handles this)
+   - **Environment**: `Python`
+   - **Build Command**: `pip install discord.py==2.3.2 yt-dlp==2023.12.30 spotipy==2.24.0 opuslib==3.0.1 PyNaCl==1.5.0`
+   - **Start Command**: `python discord_music_bot.py`
    - **Plan**: Free (for testing)
 
 #### Option B: Using render.yaml (Automatic)
@@ -49,7 +49,7 @@ SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 
 ### 5. Configure Build Settings
 
-- **Build Command**: `docker build -t discord-bot .`
+- **Build Command**: `pip install discord.py==2.3.2 yt-dlp==2023.12.30 spotipy==2.24.0 opuslib==3.0.1 PyNaCl==1.5.0`
 - **Start Command**: `python discord_music_bot.py`
 
 ### 6. Deploy and Monitor
