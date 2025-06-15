@@ -16,6 +16,10 @@ author = "agent"
 task = "workflow.run"
 args = "Multi-Server Music Bot"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Test Interface Server"
+
 [[workflows.workflow]]
 name = "Multi-Server Music Bot"
 author = "agent"
@@ -24,5 +28,18 @@ author = "agent"
 task = "shell.exec"
 args = "python discord_music_bot.py"
 
+[[workflows.workflow]]
+name = "Test Interface Server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m http.server 5000"
+waitForPort = 5000
+
 [deployment]
 run = ["sh", "-c", "pip install discord.py yt-dlp spotipy && python discord_music_bot.py"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80

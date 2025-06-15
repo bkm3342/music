@@ -79,7 +79,8 @@ ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
 # Enhanced FFmpeg options for better audio quality with dynamic volume and seeking
 def get_ffmpeg_options(volume=0.5, seek_time=0):
-    seek_option = f'-ss {seek_time}' if seek_time > 0 else ''
+    # Only use seek if it's greater than 1 second to avoid FFmpeg errors with very small values
+    seek_option = f'-ss {int(seek_time)}' if seek_time >= 1 else ''
     return {
         'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M {seek_option}',
         'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 192k'
@@ -649,6 +650,9 @@ async def play_youtube_search_simple(interaction, query):
         voice_client.play(source)
         
         current_song_info[interaction.guild.id] = title
+        # Track when song started and cache audio URL
+        song_start_times[interaction.guild.id] = time.time()
+        current_audio_urls[interaction.guild.id] = audio_url
         
     except Exception as e:
         logger.error(f"Simple YouTube search error: {e}")
@@ -703,6 +707,9 @@ async def play_youtube_simple(interaction, url):
         voice_client.play(source)
         
         current_song_info[interaction.guild.id] = title
+        # Track when song started and cache audio URL
+        song_start_times[interaction.guild.id] = time.time()
+        current_audio_urls[interaction.guild.id] = audio_url
         
     except Exception as e:
         logger.error(f"Simple YouTube play error: {e}")
