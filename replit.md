@@ -141,6 +141,11 @@ Changelog:
 - June 15, 2025: Integrated seamless effect switching without song interruption using background processing
 - June 15, 2025: Added persistent audio effect settings per server with visual feedback indicators
 - June 15, 2025: Fixed critical auto-play bug when using audio effects - effects now apply to current song without triggering next song
+- June 15, 2025: Fixed audio stuttering issues with optimized FFmpeg buffer settings and connection parameters
+- June 15, 2025: Increased default volume from 50% to 80% for better sound levels
+- June 15, 2025: Enhanced bass boost effect with stronger low-frequency amplification
+- June 15, 2025: Fixed audio effects not applying to current song - all playback functions now properly use server-specific effects
+- June 15, 2025: Improved audio streaming stability with better buffering and reduced latency
 ```
 
 ## User Preferences

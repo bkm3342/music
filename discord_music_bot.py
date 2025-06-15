@@ -1538,13 +1538,13 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
         else:
             duration_str = "Unknown"
 
-        # Enhanced audio source with better quality settings and dynamic volume
+        # Enhanced audio source with better quality settings and dynamic volume with audio effects
         guild_queue = get_guild_queue(interaction.guild.id)
         source = discord.PCMVolumeTransformer(
             discord.FFmpegPCMAudio(
                 audio_url,
                 executable=FFMPEG_PATH,
-                **get_ffmpeg_options()
+                **get_ffmpeg_options(guild_queue.volume, 0, guild_queue.audio_effect)
             ),
             volume=guild_queue.volume
         )
