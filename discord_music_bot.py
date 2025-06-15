@@ -76,11 +76,12 @@ ytdl_format_options = {
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
-# Enhanced FFmpeg options for better audio quality
-FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M',
-    'options': '-vn -filter:a "volume=0.8" -ar 48000 -ac 2 -b:a 192k'
-}
+# Enhanced FFmpeg options for better audio quality with dynamic volume
+def get_ffmpeg_options(volume=0.5):
+    return {
+        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M',
+        'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 192k'
+    }
 
 # Global storage - separated by guild for multi-server support
 current_guild_queues = {}
@@ -94,6 +95,7 @@ class MusicQueue:
         self.is_auto_play = True
         self.loop_current = False
         self.loop_queue = False
+        self.volume = 0.5  # Default volume (50%)
         
     def add(self, item):
         self.queue.append(item)
@@ -117,6 +119,17 @@ class MusicQueue:
     def toggle_auto_play(self):
         self.is_auto_play = not self.is_auto_play
         return self.is_auto_play
+    
+    def increase_volume(self):
+        self.volume = min(1.0, self.volume + 0.1)
+        return self.volume
+    
+    def decrease_volume(self):
+        self.volume = max(0.1, self.volume - 0.1)
+        return self.volume
+    
+    def get_volume_percentage(self):
+        return int(self.volume * 100)
 
 def get_guild_queue(guild_id):
     if guild_id not in current_guild_queues:
@@ -163,7 +176,16 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_playing():
                 voice_client.stop()
-                await interaction.response.send_message("⏭️ Song skipped", ephemeral=True)
+                guild_queue = get_guild_queue(self.guild_id)
+                
+                # Check if there's a next song and auto-play is enabled
+                if guild_queue.is_auto_play and not guild_queue.is_empty():
+                    next_song = guild_queue.next()
+                    await interaction.response.send_message(f"⏭️ Skipped! Playing next: {next_song}", ephemeral=True)
+                    # Play next song
+                    await start_playback_from_button(interaction, next_song)
+                else:
+                    await interaction.response.send_message("⏭️ Song skipped", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
         except Exception as e:
@@ -217,7 +239,39 @@ class MusicDashboardView(discord.ui.View):
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ Error occurred", ephemeral=True)
         
-    @discord.ui.button(label="🗑️ Clear Queue", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="🔊+", style=discord.ButtonStyle.secondary, row=1)
+    async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            new_volume = guild_queue.increase_volume()
+            voice_client = interaction.guild.voice_client
+            
+            if voice_client and hasattr(voice_client.source, 'volume'):
+                voice_client.source.volume = new_volume
+            
+            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Volume up error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+    
+    @discord.ui.button(label="🔉-", style=discord.ButtonStyle.secondary, row=1)
+    async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            new_volume = guild_queue.decrease_volume()
+            voice_client = interaction.guild.voice_client
+            
+            if voice_client and hasattr(voice_client.source, 'volume'):
+                voice_client.source.volume = new_volume
+            
+            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Volume down error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+        
+    @discord.ui.button(label="🗑️ Clear Queue", style=discord.ButtonStyle.danger, row=2)
     async def clear_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
@@ -319,6 +373,20 @@ async def start_playback(interaction, query):
         logger.error(f"Error in start_playback: {e}")
         await interaction.followup.send(f"❌ An error occurred: {e}")
 
+async def start_playback_from_button(interaction, query):
+    """Start playback triggered from button interaction (for skip functionality)"""
+    try:
+        if SPOTIFY_ENABLED and 'spotify.com/track/' in query:
+            await play_spotify_track_simple(interaction, query)
+        elif SPOTIFY_ENABLED and 'spotify.com/playlist/' in query:
+            await play_spotify_playlist_simple(interaction, query)
+        elif 'youtube.com' in query or 'youtu.be' in query:
+            await play_youtube_simple(interaction, query)
+        else:
+            await play_youtube_search_simple(interaction, query)
+    except Exception as e:
+        logger.error(f"Error in start_playback_from_button: {e}")
+
 async def wait_for_song_completion(interaction):
     """Wait for current song to complete and handle queue progression"""
     try:
@@ -332,6 +400,156 @@ async def wait_for_song_completion(interaction):
             await start_playback(interaction, next_song)
     except Exception as e:
         logger.error(f"Wait for song completion error: {e}")
+
+async def play_youtube_search_simple(interaction, query):
+    """Simplified YouTube search for button interactions"""
+    try:
+        search_query = query
+        if not any(keyword in query.lower() for keyword in ['song', 'music', 'audio', 'track', 'lyrics', 'official']):
+            search_query = f"{query} song"
+            
+        info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+        if not info.get('entries'):
+            return
+
+        video_info = info['entries'][0]
+        formats = video_info.get('formats', [])
+        audio_url = None
+        
+        for fmt in formats:
+            if (fmt.get('acodec', 'none') != 'none' and 
+                fmt.get('vcodec', 'none') == 'none' and 
+                fmt.get('ext') == 'm4a'):
+                audio_url = fmt.get('url')
+                break
+                
+        if not audio_url:
+            for fmt in formats:
+                if (fmt.get('acodec', 'none') != 'none' and 
+                    fmt.get('vcodec', 'none') == 'none'):
+                    audio_url = fmt.get('url')
+                    break
+                    
+        if not audio_url:
+            audio_url = video_info.get('url')
+            
+        if not audio_url:
+            return
+            
+        title = video_info.get('title', 'Unknown Title')
+        guild_queue = get_guild_queue(interaction.guild.id)
+        
+        source = discord.FFmpegPCMAudio(
+            audio_url,
+            executable=FFMPEG_PATH,
+            **get_ffmpeg_options(guild_queue.volume)
+        )
+
+        voice_client = interaction.guild.voice_client
+        if voice_client.is_playing():
+            voice_client.stop()
+        voice_client.play(source)
+        
+        current_song_info[interaction.guild.id] = title
+        
+    except Exception as e:
+        logger.error(f"Simple YouTube search error: {e}")
+
+async def play_youtube_simple(interaction, url):
+    """Simplified YouTube play for button interactions"""
+    try:
+        info = ytdl.extract_info(url, download=False)
+        
+        if 'entries' in info:
+            if not info['entries']:
+                return
+            info = info['entries'][0]
+        
+        if not info:
+            return
+        
+        title = info.get('title', 'Unknown Title')
+        formats = info.get('formats', [])
+        audio_url = None
+        
+        for fmt in formats:
+            if (fmt.get('acodec', 'none') != 'none' and 
+                fmt.get('vcodec', 'none') == 'none' and 
+                fmt.get('ext') == 'm4a'):
+                audio_url = fmt.get('url')
+                break
+                
+        if not audio_url:
+            for fmt in formats:
+                if (fmt.get('acodec', 'none') != 'none' and 
+                    fmt.get('vcodec', 'none') == 'none'):
+                    audio_url = fmt.get('url')
+                    break
+                    
+        if not audio_url:
+            audio_url = info.get('url')
+            
+        if not audio_url:
+            return
+
+        guild_queue = get_guild_queue(interaction.guild.id)
+        source = discord.FFmpegPCMAudio(
+            audio_url,
+            executable=FFMPEG_PATH,
+            **get_ffmpeg_options(guild_queue.volume)
+        )
+
+        voice_client = interaction.guild.voice_client
+        if voice_client.is_playing():
+            voice_client.stop()
+        voice_client.play(source)
+        
+        current_song_info[interaction.guild.id] = title
+        
+    except Exception as e:
+        logger.error(f"Simple YouTube play error: {e}")
+
+async def play_spotify_track_simple(interaction, url):
+    """Simplified Spotify track play for button interactions"""
+    try:
+        track_id = extract_spotify_track_id(url)
+        if not track_id:
+            return
+
+        track = sp.track(track_id)
+        track_name = track['name']
+        artist_name = track['artists'][0]['name']
+        
+        query = f"{track_name} {artist_name}"
+        await play_youtube_search_simple(interaction, query)
+
+    except Exception as e:
+        logger.error(f"Simple Spotify track error: {e}")
+
+async def play_spotify_playlist_simple(interaction, url):
+    """Simplified Spotify playlist for button interactions"""
+    try:
+        playlist_id = extract_spotify_playlist_id(url)
+        if not playlist_id:
+            return
+
+        playlist = sp.playlist(playlist_id)
+        tracks = playlist['tracks']['items']
+
+        if not tracks:
+            return
+
+        # Just play the first track for button interactions
+        track_item = tracks[0]
+        if track_item['track']:
+            track = track_item['track']
+            name = track['name']
+            artist = track['artists'][0]['name']
+            query = f"{name} {artist}"
+            await play_youtube_search_simple(interaction, query)
+
+    except Exception as e:
+        logger.error(f"Simple Spotify playlist error: {e}")
 
 async def play_youtube_search(interaction, query, spotify_link=None, track_name=None, artist_name=None):
     """Search and play from YouTube with enhanced audio quality"""
@@ -385,11 +603,12 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
         else:
             duration_str = "Unknown"
 
-        # Enhanced audio source with better quality settings
+        # Enhanced audio source with better quality settings and dynamic volume
+        guild_queue = get_guild_queue(interaction.guild.id)
         source = discord.FFmpegPCMAudio(
             audio_url,
             executable=FFMPEG_PATH,
-            **FFMPEG_OPTIONS
+            **get_ffmpeg_options(guild_queue.volume)
         )
 
         voice_client = interaction.guild.voice_client
@@ -490,10 +709,11 @@ async def play_youtube(interaction, url_or_query):
         else:
             duration_str = "Unknown"
 
+        guild_queue = get_guild_queue(interaction.guild.id)
         source = discord.FFmpegPCMAudio(
             audio_url,
             executable=FFMPEG_PATH,
-            **FFMPEG_OPTIONS
+            **get_ffmpeg_options(guild_queue.volume)
         )
 
         voice_client = interaction.guild.voice_client
