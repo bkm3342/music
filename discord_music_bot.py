@@ -813,6 +813,10 @@ async def wait_for_song_completion(interaction):
         while interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
             await asyncio.sleep(2)
         
+        # Check if guild is paused - don't auto-play if paused
+        if interaction.guild.id in paused_guilds:
+            return
+        
         guild_queue = get_guild_queue(interaction.guild.id)
         if guild_queue.is_auto_play:
             if not guild_queue.is_empty():

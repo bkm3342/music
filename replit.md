@@ -116,6 +116,12 @@ Changelog:
 - June 15, 2025: Implemented server-specific volume settings with real-time adjustment feedback
 - June 15, 2025: Fixed volume controls to prevent song interruption and interaction timeout errors
 - June 15, 2025: Enhanced skip button with immediate queue progression and seamless audio transitions
+- June 15, 2025: Implemented PCMVolumeTransformer for real-time volume adjustment without song interruption
+- June 15, 2025: Fixed pause button to properly pause/resume without triggering random song playback
+- June 15, 2025: Added paused state tracking to prevent automatic song progression when music is paused
+- June 15, 2025: Updated volume controls to edit existing messages instead of creating new ones for cleaner chat
+- June 15, 2025: Added live ping command to monitor bot latency and responsiveness
+- June 15, 2025: Enhanced error handling and state management for better multi-server reliability
 ```
 
 ## User Preferences
