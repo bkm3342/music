@@ -111,6 +111,9 @@ Changelog:
 - June 15, 2025: Upgraded audio quality with 192k bitrate, 48kHz sample rate, and M4A format priority
 - June 15, 2025: Fixed interaction acknowledgment errors and improved error handling across all commands
 - June 15, 2025: Added auto-disconnect feature and server-specific voice channel management
+- June 15, 2025: Added volume up/down controls with dynamic FFmpeg volume processing
+- June 15, 2025: Fixed skip button to properly play next song from queue with auto-play integration
+- June 15, 2025: Implemented server-specific volume settings with real-time adjustment feedback
 ```
 
 ## User Preferences
