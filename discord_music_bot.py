@@ -77,13 +77,25 @@ ytdl_format_options = {
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
-# Enhanced FFmpeg options for better audio quality with dynamic volume and seeking
-def get_ffmpeg_options(volume=0.5, seek_time=0):
+# Enhanced FFmpeg options with audio effects and maximum quality
+def get_ffmpeg_options(volume=0.5, seek_time=0, audio_effect=None):
     # Only use seek if it's greater than 1 second to avoid FFmpeg errors with very small values
     seek_option = f'-ss {int(seek_time)}' if seek_time >= 1 else ''
+    
+    # Base high-quality audio filter
+    base_filter = f"volume={volume}"
+    
+    # Add audio effects
+    if audio_effect == "bass_boost":
+        base_filter += ",equalizer=f=60:width_type=h:width=50:g=5,equalizer=f=170:width_type=h:width=50:g=3"
+    elif audio_effect == "nightcore":
+        base_filter += ",asetrate=48000*1.25,aresample=48000,atempo=1.06"
+    elif audio_effect == "slowed_reverb":
+        base_filter += ",asetrate=48000*0.8,aresample=48000,aecho=0.8:0.9:1000:0.3"
+    
     return {
-        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 50M -analyzeduration 50M {seek_option} -nostdin',
-        'options': f'-vn -filter:a "volume={volume}" -ar 48000 -ac 2 -b:a 256k -bufsize 2M -threads 2 -cpu-used 0'
+        'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 100M -analyzeduration 100M {seek_option} -nostdin',
+        'options': f'-vn -filter:a "{base_filter}" -ar 48000 -ac 2 -b:a 320k -bufsize 4M -threads 4 -preset ultrafast'
     }
 
 # Voice stability enhancements
@@ -346,6 +358,8 @@ class MusicQueue:
         self.max_volume = 1.0
         self.min_volume = 0.1
         self.volume_step = 0.1
+        self.audio_effect = None  # Current audio effect
+        self.is_paused_by_voice_activity = False  # Track if paused by voice activity
         
     def add(self, item):
         self.queue.append(item)
@@ -396,6 +410,24 @@ class MusicQueue:
     
     def get_volume_percentage(self):
         return int(self.volume * 100)
+    
+    def set_audio_effect(self, effect):
+        """Set audio effect (bass_boost, nightcore, slowed_reverb, or None)"""
+        valid_effects = [None, "bass_boost", "nightcore", "slowed_reverb"]
+        if effect in valid_effects:
+            self.audio_effect = effect
+            return True
+        return False
+    
+    def get_audio_effect_display(self):
+        """Get display name for current audio effect"""
+        effects_display = {
+            None: "Normal",
+            "bass_boost": "🔊 Bass Boost",
+            "nightcore": "⚡ Nightcore",
+            "slowed_reverb": "🌊 Slowed + Reverb"
+        }
+        return effects_display.get(self.audio_effect, "Normal")
 
 def get_guild_queue(guild_id):
     if guild_id not in current_guild_queues:
@@ -801,7 +833,100 @@ class MusicDashboardView(discord.ui.View):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
         
-    @discord.ui.button(emoji=get_emoji('volume_up'), label="Vol+", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji="🔊", label="Bass Boost", style=discord.ButtonStyle.secondary, row=1)
+    async def bass_boost_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            voice_client = interaction.guild.voice_client
+            
+            if voice_client and voice_client.is_playing():
+                # Toggle bass boost effect
+                current_effect = guild_queue.audio_effect
+                new_effect = None if current_effect == "bass_boost" else "bass_boost"
+                guild_queue.set_audio_effect(new_effect)
+                
+                current_song = current_song_info.get(self.guild_id, "Unknown Song")
+                
+                embed = discord.Embed(
+                    title=f"🔊 Bass Boost {'ON' if new_effect else 'OFF'}",
+                    description=f"Applied to: **{current_song[:40]}{'...' if len(current_song) > 40 else ''}**",
+                    color=0x00ff00 if new_effect else 0x808080
+                )
+                embed.add_field(name="Effect", value=guild_queue.get_audio_effect_display(), inline=True)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+                # Restart audio with new effect
+                await self.restart_audio_with_effect(interaction, current_song, new_effect)
+            else:
+                await interaction.response.send_message("❌ No music is currently playing", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Bass boost button error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error applying bass boost", ephemeral=True)
+
+    @discord.ui.button(emoji="⚡", label="Nightcore", style=discord.ButtonStyle.secondary, row=1)
+    async def nightcore_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            voice_client = interaction.guild.voice_client
+            
+            if voice_client and voice_client.is_playing():
+                # Toggle nightcore effect
+                current_effect = guild_queue.audio_effect
+                new_effect = None if current_effect == "nightcore" else "nightcore"
+                guild_queue.set_audio_effect(new_effect)
+                
+                current_song = current_song_info.get(self.guild_id, "Unknown Song")
+                
+                embed = discord.Embed(
+                    title=f"⚡ Nightcore {'ON' if new_effect else 'OFF'}",
+                    description=f"Applied to: **{current_song[:40]}{'...' if len(current_song) > 40 else ''}**",
+                    color=0xffff00 if new_effect else 0x808080
+                )
+                embed.add_field(name="Effect", value=guild_queue.get_audio_effect_display(), inline=True)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+                # Restart audio with new effect
+                await self.restart_audio_with_effect(interaction, current_song, new_effect)
+            else:
+                await interaction.response.send_message("❌ No music is currently playing", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Nightcore button error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error applying nightcore", ephemeral=True)
+
+    @discord.ui.button(emoji="🌊", label="Slowed + Reverb", style=discord.ButtonStyle.secondary, row=1)
+    async def slowed_reverb_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            guild_queue = get_guild_queue(self.guild_id)
+            voice_client = interaction.guild.voice_client
+            
+            if voice_client and voice_client.is_playing():
+                # Toggle slowed + reverb effect
+                current_effect = guild_queue.audio_effect
+                new_effect = None if current_effect == "slowed_reverb" else "slowed_reverb"
+                guild_queue.set_audio_effect(new_effect)
+                
+                current_song = current_song_info.get(self.guild_id, "Unknown Song")
+                
+                embed = discord.Embed(
+                    title=f"🌊 Slowed + Reverb {'ON' if new_effect else 'OFF'}",
+                    description=f"Applied to: **{current_song[:40]}{'...' if len(current_song) > 40 else ''}**",
+                    color=0x0099ff if new_effect else 0x808080
+                )
+                embed.add_field(name="Effect", value=guild_queue.get_audio_effect_display(), inline=True)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+                # Restart audio with new effect
+                await self.restart_audio_with_effect(interaction, current_song, new_effect)
+            else:
+                await interaction.response.send_message("❌ No music is currently playing", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Slowed + reverb button error: {e}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Error applying slowed + reverb", ephemeral=True)
+
+    @discord.ui.button(emoji=get_emoji('volume_up'), label="Vol+", style=discord.ButtonStyle.secondary, row=2)
     async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
@@ -1834,29 +1959,46 @@ async def on_application_command_error(interaction: discord.Interaction, error):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """Handle voice state updates for better multi-server management"""
+    """Enhanced voice activity detection with auto-pause/resume"""
     if member == bot.user:
         return
     
     try:
         voice_client = member.guild.voice_client
         if voice_client and voice_client.channel:
-            # Check if bot is alone in voice channel
+            guild_queue = get_guild_queue(member.guild.id)
             non_bot_members = [m for m in voice_client.channel.members if not m.bot]
+            
+            # Voice Activity Detection - Auto pause when channel is empty
             if len(non_bot_members) == 0:
+                if voice_client.is_playing() and not guild_queue.is_paused_by_voice_activity:
+                    voice_client.pause()
+                    guild_queue.is_paused_by_voice_activity = True
+                    paused_guilds.add(member.guild.id)
+                    logger.info(f"Auto-paused music in {member.guild.name} - channel empty")
+                
                 # Wait 60 seconds then disconnect if still alone
                 await asyncio.sleep(60)
                 if voice_client and voice_client.channel:
                     current_non_bot = [m for m in voice_client.channel.members if not m.bot]
                     if len(current_non_bot) == 0:
                         logger.info(f"Auto-disconnecting from {member.guild.name} due to inactivity")
-                        guild_queue = get_guild_queue(member.guild.id)
                         guild_queue.clear()
                         if member.guild.id in current_song_info:
                             del current_song_info[member.guild.id]
                         if member.guild.id in guild_voice_clients:
                             del guild_voice_clients[member.guild.id]
+                        paused_guilds.discard(member.guild.id)
                         await voice_client.disconnect()
+            
+            # Voice Activity Detection - Auto resume when members join
+            elif len(non_bot_members) > 0 and guild_queue.is_paused_by_voice_activity:
+                if voice_client.is_paused():
+                    voice_client.resume()
+                    guild_queue.is_paused_by_voice_activity = False
+                    paused_guilds.discard(member.guild.id)
+                    logger.info(f"Auto-resumed music in {member.guild.name} - members joined")
+                    
     except Exception as e:
         logger.error(f"Voice state update error in {member.guild.name}: {e}")
 
