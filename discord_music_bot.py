@@ -228,13 +228,13 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_playing():
                 voice_client.pause()
-                await interaction.response.send_message("⏸️ Music paused", ephemeral=True)
+                await interaction.response.send_message("⏸️ Music paused")
             else:
-                await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
+                await interaction.response.send_message("❌ Nothing is playing")
         except Exception as e:
             logger.error(f"Pause button error: {e}")
             if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+                await interaction.response.send_message("❌ Error occurred")
             
     @discord.ui.button(label="▶️ Resume", style=discord.ButtonStyle.success, row=0)
     async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -242,13 +242,13 @@ class MusicDashboardView(discord.ui.View):
             voice_client = interaction.guild.voice_client
             if voice_client and voice_client.is_paused():
                 voice_client.resume()
-                await interaction.response.send_message("▶️ Music resumed", ephemeral=True)
+                await interaction.response.send_message("▶️ Music resumed")
             else:
-                await interaction.response.send_message("❌ Nothing is paused", ephemeral=True)
+                await interaction.response.send_message("❌ Nothing is paused")
         except Exception as e:
             logger.error(f"Resume button error: {e}")
             if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+                await interaction.response.send_message("❌ Error occurred")
             
     @discord.ui.button(label="⏭️ Skip", style=discord.ButtonStyle.primary, row=0)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -278,7 +278,22 @@ class MusicDashboardView(discord.ui.View):
                         logger.error(f"Error playing next song: {play_error}")
                         await interaction.followup.send("❌ Error playing next song", ephemeral=True)
                 else:
-                    await interaction.response.send_message("⏭️ Skipped - No more songs in queue", ephemeral=True)
+                    # No songs in queue - check if auto-play is enabled
+                    if guild_queue.is_auto_play:
+                        await interaction.response.send_message("⏭️ Skipped - Auto-playing similar music", ephemeral=True)
+                        # Generate autoplay suggestion
+                        current_song = current_song_info.get(self.guild_id)
+                        if current_song:
+                            similar_query = await generate_smart_autoplay_query(current_song)
+                            try:
+                                await self.play_next_youtube_search(interaction, similar_query)
+                            except Exception as play_error:
+                                logger.error(f"Error in autoplay: {play_error}")
+                                await interaction.followup.send("❌ No more songs to play", ephemeral=True)
+                        else:
+                            await interaction.followup.send("❌ No more songs to play", ephemeral=True)
+                    else:
+                        await interaction.response.send_message("⏭️ Skipped - Queue is empty. Enable auto-play for continuous music", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
         except Exception as e:
@@ -561,8 +576,8 @@ class MusicDashboardView(discord.ui.View):
             old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
             
-            # Respond immediately to avoid timeout
-            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
+            # Respond with live update for all users
+            await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%")
             
             # Apply volume change without restarting the song
             voice_client = interaction.guild.voice_client
@@ -586,8 +601,8 @@ class MusicDashboardView(discord.ui.View):
             old_volume = guild_queue.volume
             new_volume = guild_queue.decrease_volume()
             
-            # Respond immediately to avoid timeout
-            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
+            # Respond with live update for all users
+            await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%")
             
             # Apply volume change without restarting the song
             voice_client = interaction.guild.voice_client
@@ -1028,7 +1043,11 @@ async def play_youtube_search(interaction, query, spotify_link=None, track_name=
         voice_client = interaction.guild.voice_client
         if voice_client.is_playing():
             voice_client.stop()
-        voice_client.play(source, after=lambda e: asyncio.create_task(wait_for_song_completion(interaction)) if e is None else None)
+        def after_playing(error):
+            if error is None:
+                asyncio.run_coroutine_threadsafe(wait_for_song_completion(interaction), bot.loop)
+        
+        voice_client.play(source, after=after_playing)
         
         # Store current song info per guild
         if spotify_link and track_name and artist_name:
