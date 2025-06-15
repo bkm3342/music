@@ -134,21 +134,24 @@ async def safe_voice_connect(channel, retries=3):
             else:
                 raise e
 
-# Enhanced Animated Emojis (using static emojis as fallback for compatibility)
+# Enhanced Animated Emojis with proper animated support
 ANIMATED_EMOJIS = {
-    'play': '🎵',
-    'pause': '⏸️',
-    'stop': '⏹️',
-    'skip': '⏭️',
-    'queue': '📜',
-    'volume_up': '🔊',
-    'volume_down': '🔉',
-    'autoplay': '🔄',
-    'loading': '⏳',
-    'success': '✅',
-    'error': '❌',
-    'music_note': '🎵',
-    'sound_wave': '〰️'
+    'play': '<a:music_play:1234567890123456789>',
+    'pause': '<a:music_pause:1234567890123456789>',
+    'stop': '<a:music_stop:1234567890123456789>',
+    'skip': '<a:music_skip:1234567890123456789>',
+    'queue': '<a:music_queue:1234567890123456789>',
+    'volume_up': '<a:volume_up:1234567890123456789>',
+    'volume_down': '<a:volume_down:1234567890123456789>',
+    'autoplay': '<a:autoplay:1234567890123456789>',
+    'loading': '<a:loading_dots:1234567890123456789>',
+    'success': '<a:check_green:1234567890123456789>',
+    'error': '<a:cross_red:1234567890123456789>',
+    'music_note': '<a:music_notes:1234567890123456789>',
+    'sound_wave': '<a:sound_waves:1234567890123456789>',
+    'equalizer': '<a:equalizer:1234567890123456789>',
+    'radio': '<a:radio_wave:1234567890123456789>',
+    'heart_beat': '<a:heart_pulse:1234567890123456789>'
 }
 
 # Fallback static emojis if animated ones aren't available
@@ -192,6 +195,8 @@ song_start_times = {}  # Track when songs started playing
 current_audio_urls = {}  # Track current audio URLs for volume changes
 played_songs_history = {}  # Track played songs to avoid repetition
 volume_messages = {}  # Track volume messages for editing
+volume_control_messages = {}  # Global volume control messages that everyone can see
+dashboard_messages = {}  # Track dashboard messages for updating
 paused_guilds = set()  # Track paused guilds to prevent auto-play
 manually_skipped_guilds = set()  # Track guilds where skip button was used
 
@@ -801,27 +806,15 @@ class MusicDashboardView(discord.ui.View):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
         
-    @discord.ui.button(emoji=get_emoji('volume_up'), label="Vol+", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji="🔊", label="Vol+", style=discord.ButtonStyle.secondary, row=1)
     async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
             old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
             
-            embed = discord.Embed(
-                title=f"{get_emoji('volume_up')} Volume Increased",
-                description=f"Volume set to **{guild_queue.get_volume_percentage()}%**",
-                color=EMBED_COLORS['success']
-            )
-            
-            # Visual volume bar
-            volume_bar_length = 20
-            filled_bars = int((new_volume * volume_bar_length))
-            volume_bar = "█" * filled_bars + "░" * (volume_bar_length - filled_bars)
-            embed.add_field(name="Volume Level", value=f"`{volume_bar}`", inline=False)
-            embed.set_footer(text=f"Server: {interaction.guild.name}")
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # Update global volume control message
+            await update_global_volume_control(interaction, guild_queue.get_volume_percentage(), "increased")
             
             # Apply volume change instantly
             voice_client = interaction.guild.voice_client
@@ -831,35 +824,22 @@ class MusicDashboardView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Volume up error: {e}")
-            if not interaction.response.is_done():
-                embed = discord.Embed(
-                    title=f"{get_emoji('error')} Volume Error",
-                    description="Failed to increase volume",
-                    color=EMBED_COLORS['error']
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+            embed = discord.Embed(
+                title="🚫 Volume Error",
+                description="Failed to increase volume",
+                color=EMBED_COLORS['error']
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
     
-    @discord.ui.button(emoji=get_emoji('volume_down'), label="Vol-", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(emoji="🔉", label="Vol-", style=discord.ButtonStyle.secondary, row=1)
     async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
             old_volume = guild_queue.volume
             new_volume = guild_queue.decrease_volume()
             
-            embed = discord.Embed(
-                title=f"{get_emoji('volume_down')} Volume Decreased",
-                description=f"Volume set to **{guild_queue.get_volume_percentage()}%**",
-                color=EMBED_COLORS['warning']
-            )
-            
-            # Visual volume bar
-            volume_bar_length = 20
-            filled_bars = int((new_volume * volume_bar_length))
-            volume_bar = "█" * filled_bars + "░" * (volume_bar_length - filled_bars)
-            embed.add_field(name="Volume Level", value=f"`{volume_bar}`", inline=False)
-            embed.set_footer(text=f"Server: {interaction.guild.name}")
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # Update global volume control message
+            await update_global_volume_control(interaction, guild_queue.get_volume_percentage(), "decreased")
             
             # Apply volume change instantly
             voice_client = interaction.guild.voice_client
@@ -869,13 +849,97 @@ class MusicDashboardView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Volume down error: {e}")
+            embed = discord.Embed(
+                title="🚫 Volume Error",
+                description="Failed to decrease volume",
+                color=EMBED_COLORS['error']
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+async def update_global_volume_control(interaction, volume_percentage, action):
+    """Update or create a global volume control message that everyone can see"""
+    try:
+        guild_id = interaction.guild.id
+        
+        # Create advanced volume embed
+        embed = discord.Embed(
+            title="🎚️ Volume Control Panel",
+            description=f"**Current Volume: {volume_percentage}%**",
+            color=EMBED_COLORS['primary']
+        )
+        
+        # Advanced volume visualization
+        volume_bar_length = 30
+        filled_bars = int((volume_percentage / 100) * volume_bar_length)
+        empty_bars = volume_bar_length - filled_bars
+        
+        # Create gradient volume bar
+        volume_bar = ""
+        for i in range(volume_bar_length):
+            if i < filled_bars:
+                if i < volume_bar_length * 0.3:
+                    volume_bar += "🟢"  # Green for low volume
+                elif i < volume_bar_length * 0.7:
+                    volume_bar += "🟡"  # Yellow for medium volume
+                else:
+                    volume_bar += "🔴"  # Red for high volume
+            else:
+                volume_bar += "⚫"  # Empty
+        
+        embed.add_field(
+            name="🎵 Volume Level",
+            value=f"{volume_bar}\n`{'█' * filled_bars}{'░' * empty_bars}`",
+            inline=False
+        )
+        
+        # Volume status
+        if volume_percentage >= 80:
+            status = "🔊 **LOUD**"
+        elif volume_percentage >= 50:
+            status = "🔉 **MEDIUM**"
+        elif volume_percentage >= 20:
+            status = "🔈 **LOW**"
+        else:
+            status = "🔇 **QUIET**"
+        
+        embed.add_field(name="Status", value=status, inline=True)
+        embed.add_field(name="Last Action", value=f"Volume {action}", inline=True)
+        embed.add_field(name="Changed By", value=interaction.user.mention, inline=True)
+        
+        embed.set_footer(
+            text=f"🎧 {interaction.guild.name} • Use dashboard buttons to control",
+            icon_url=interaction.guild.icon.url if interaction.guild.icon else None
+        )
+        embed.timestamp = discord.utils.utcnow()
+        
+        # Update existing message or create new one
+        if guild_id in volume_control_messages:
+            try:
+                message = volume_control_messages[guild_id]
+                await message.edit(embed=embed)
+                await interaction.response.send_message("✅ Volume updated!", ephemeral=True)
+            except:
+                # Message no longer exists, create new one
+                message = await interaction.followup.send(embed=embed, ephemeral=False)
+                volume_control_messages[guild_id] = message
+        else:
+            # Create new volume control message
             if not interaction.response.is_done():
-                embed = discord.Embed(
-                    title=f"{get_emoji('error')} Volume Error",
-                    description="Failed to decrease volume",
-                    color=EMBED_COLORS['error']
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                message = await interaction.response.send_message(embed=embed, ephemeral=False)
+                volume_control_messages[guild_id] = message
+            else:
+                message = await interaction.followup.send(embed=embed, ephemeral=False)
+                volume_control_messages[guild_id] = message
+        
+    except Exception as e:
+        logger.error(f"Error updating global volume control: {e}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"✅ Volume {action} to {volume_percentage}%", ephemeral=True)
+
+class MusicDashboardView(discord.ui.View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
     
     async def restart_audio_with_volume(self, interaction, title, volume):
         """Restart current audio with new volume quickly"""
