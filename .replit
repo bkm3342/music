@@ -1,0 +1,39 @@
+modules = ["python-3.11"]
+
+[nix]
+channel = "stable-24_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Discord Music Bot"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "discord_bot_test"
+
+[[workflows.workflow]]
+name = "Discord Music Bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install discord.py yt-dlp spotipy && python discord_music_bot.py"
+
+[[workflows.workflow]]
+name = "discord_bot_test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install discord.py yt-dlp spotipy asyncio && python discord_music_bot.py"
+
+[deployment]
+run = ["sh", "-c", "pip install discord.py yt-dlp spotipy && python discord_music_bot.py"]
