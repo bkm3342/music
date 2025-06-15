@@ -174,24 +174,129 @@ class MusicDashboardView(discord.ui.View):
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             voice_client = interaction.guild.voice_client
+            guild_queue = get_guild_queue(self.guild_id)
+            
             if voice_client and voice_client.is_playing():
                 voice_client.stop()
-                guild_queue = get_guild_queue(self.guild_id)
                 
-                # Check if there's a next song and auto-play is enabled
-                if guild_queue.is_auto_play and not guild_queue.is_empty():
+                # Always check for next song, regardless of auto-play setting
+                if not guild_queue.is_empty():
                     next_song = guild_queue.next()
-                    await interaction.response.send_message(f"⏭️ Skipped! Playing next: {next_song}", ephemeral=True)
-                    # Play next song
-                    await start_playback_from_button(interaction, next_song)
+                    await interaction.response.send_message(f"⏭️ Playing next: {next_song}", ephemeral=True)
+                    
+                    # Immediately play next song
+                    try:
+                        if SPOTIFY_ENABLED and 'spotify.com/track/' in next_song:
+                            await self.play_next_spotify_track(interaction, next_song)
+                        elif SPOTIFY_ENABLED and 'spotify.com/playlist/' in next_song:
+                            await self.play_next_spotify_playlist(interaction, next_song)  
+                        elif 'youtube.com' in next_song or 'youtu.be' in next_song:
+                            await self.play_next_youtube(interaction, next_song)
+                        else:
+                            await self.play_next_youtube_search(interaction, next_song)
+                    except Exception as play_error:
+                        logger.error(f"Error playing next song: {play_error}")
+                        await interaction.followup.send("❌ Error playing next song", ephemeral=True)
                 else:
-                    await interaction.response.send_message("⏭️ Song skipped", ephemeral=True)
+                    await interaction.response.send_message("⏭️ Skipped - No more songs in queue", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ Nothing is playing", ephemeral=True)
         except Exception as e:
             logger.error(f"Skip button error: {e}")
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+    
+    async def play_next_youtube_search(self, interaction, query):
+        """Play next song from YouTube search immediately"""
+        try:
+            search_query = f"{query} song" if not any(keyword in query.lower() for keyword in ['song', 'music', 'audio']) else query
+            info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+            
+            if info and info.get('entries'):
+                video_info = info['entries'][0]
+                audio_url = self.get_best_audio_url(video_info)
+                if audio_url:
+                    await self.start_audio_playback(interaction, audio_url, video_info.get('title', 'Unknown'))
+        except Exception as e:
+            logger.error(f"Error in play_next_youtube_search: {e}")
+    
+    async def play_next_youtube(self, interaction, url):
+        """Play next song from YouTube URL immediately"""
+        try:
+            info = ytdl.extract_info(url, download=False)
+            if 'entries' in info and info['entries']:
+                info = info['entries'][0]
+            
+            if info:
+                audio_url = self.get_best_audio_url(info)
+                if audio_url:
+                    await self.start_audio_playback(interaction, audio_url, info.get('title', 'Unknown'))
+        except Exception as e:
+            logger.error(f"Error in play_next_youtube: {e}")
+    
+    async def play_next_spotify_track(self, interaction, url):
+        """Play next Spotify track immediately"""
+        try:
+            track_id = extract_spotify_track_id(url)
+            if track_id and SPOTIFY_ENABLED:
+                track = sp.track(track_id)
+                query = f"{track['name']} {track['artists'][0]['name']}"
+                await self.play_next_youtube_search(interaction, query)
+        except Exception as e:
+            logger.error(f"Error in play_next_spotify_track: {e}")
+    
+    async def play_next_spotify_playlist(self, interaction, url):
+        """Play first track from Spotify playlist immediately"""
+        try:
+            playlist_id = extract_spotify_playlist_id(url)
+            if playlist_id and SPOTIFY_ENABLED:
+                playlist = sp.playlist(playlist_id)
+                tracks = playlist['tracks']['items']
+                if tracks and tracks[0]['track']:
+                    track = tracks[0]['track']
+                    query = f"{track['name']} {track['artists'][0]['name']}"
+                    await self.play_next_youtube_search(interaction, query)
+        except Exception as e:
+            logger.error(f"Error in play_next_spotify_playlist: {e}")
+    
+    def get_best_audio_url(self, video_info):
+        """Get best quality audio URL from video info"""
+        formats = video_info.get('formats', [])
+        
+        # Try M4A first (best quality)
+        for fmt in formats:
+            if (fmt.get('acodec', 'none') != 'none' and 
+                fmt.get('vcodec', 'none') == 'none' and 
+                fmt.get('ext') == 'm4a'):
+                return fmt.get('url')
+        
+        # Try any audio-only format
+        for fmt in formats:
+            if (fmt.get('acodec', 'none') != 'none' and 
+                fmt.get('vcodec', 'none') == 'none'):
+                return fmt.get('url')
+        
+        # Fallback to main URL
+        return video_info.get('url')
+    
+    async def start_audio_playback(self, interaction, audio_url, title):
+        """Start audio playback with current volume settings"""
+        try:
+            guild_queue = get_guild_queue(interaction.guild.id)
+            voice_client = interaction.guild.voice_client
+            
+            if voice_client and audio_url:
+                source = discord.FFmpegPCMAudio(
+                    audio_url,
+                    executable=FFMPEG_PATH,
+                    **get_ffmpeg_options(guild_queue.volume)
+                )
+                
+                voice_client.play(source)
+                current_song_info[interaction.guild.id] = title
+                logger.info(f"Now playing: {title} in guild: {interaction.guild.name}")
+        except Exception as e:
+            logger.error(f"Error in start_audio_playback: {e}")
             
     @discord.ui.button(label="🔄 Auto-Play: ON", style=discord.ButtonStyle.success, row=1)
     async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -243,11 +348,21 @@ class MusicDashboardView(discord.ui.View):
     async def volume_up_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
+            old_volume = guild_queue.volume
             new_volume = guild_queue.increase_volume()
+            
+            # Store current song info for restart
+            current_title = current_song_info.get(interaction.guild.id, "Unknown")
             voice_client = interaction.guild.voice_client
             
-            if voice_client and hasattr(voice_client.source, 'volume'):
-                voice_client.source.volume = new_volume
+            # If currently playing, apply volume change immediately
+            if voice_client and voice_client.is_playing():
+                # Force restart audio with new volume
+                voice_client.stop()
+                await asyncio.sleep(0.5)  # Small delay to ensure stop
+                
+                # Get current audio URL from stored info and restart
+                await self.restart_audio_with_volume(interaction, current_title, new_volume)
             
             await interaction.response.send_message(f"🔊 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
         except Exception as e:
@@ -259,17 +374,49 @@ class MusicDashboardView(discord.ui.View):
     async def volume_down_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             guild_queue = get_guild_queue(self.guild_id)
+            old_volume = guild_queue.volume  
             new_volume = guild_queue.decrease_volume()
+            
+            # Store current song info for restart
+            current_title = current_song_info.get(interaction.guild.id, "Unknown")
             voice_client = interaction.guild.voice_client
             
-            if voice_client and hasattr(voice_client.source, 'volume'):
-                voice_client.source.volume = new_volume
+            # If currently playing, apply volume change immediately
+            if voice_client and voice_client.is_playing():
+                # Force restart audio with new volume
+                voice_client.stop()
+                await asyncio.sleep(0.5)  # Small delay to ensure stop
+                
+                # Get current audio URL from stored info and restart
+                await self.restart_audio_with_volume(interaction, current_title, new_volume)
             
             await interaction.response.send_message(f"🔉 Volume: {guild_queue.get_volume_percentage()}%", ephemeral=True)
         except Exception as e:
             logger.error(f"Volume down error: {e}")
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌ Error occurred", ephemeral=True)
+    
+    async def restart_audio_with_volume(self, interaction, title, volume):
+        """Restart current audio with new volume"""
+        try:
+            # Search for the current song again to get fresh URL
+            search_query = f"{title} song"
+            info = ytdl.extract_info(f"ytsearch:{search_query}", download=False)
+            
+            if info and info.get('entries'):
+                video_info = info['entries'][0]
+                audio_url = self.get_best_audio_url(video_info)
+                if audio_url:
+                    voice_client = interaction.guild.voice_client
+                    if voice_client:
+                        source = discord.FFmpegPCMAudio(
+                            audio_url,
+                            executable=FFMPEG_PATH,
+                            **get_ffmpeg_options(volume)
+                        )
+                        voice_client.play(source)
+        except Exception as e:
+            logger.error(f"Error restarting audio with volume: {e}")
         
     @discord.ui.button(label="🗑️ Clear Queue", style=discord.ButtonStyle.danger, row=2)
     async def clear_button(self, interaction: discord.Interaction, button: discord.ui.Button):
