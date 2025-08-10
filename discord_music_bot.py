@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---- Bot Configuration ----
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "MTQwNDEwOTUyOTU0NDkxNzExNA.GVm_zu.4S0rBrdY_kxw_lSOu1hlRO2J9mZYv45gZhUgjw")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "56a295f2e2d0424588992d92275cd1c8")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "eba3e96a03334f7a832ae5f06ceb48d2")
 
